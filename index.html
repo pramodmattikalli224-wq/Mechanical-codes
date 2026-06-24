@@ -1,0 +1,4985 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DRAFT/2 — 2D CAD Workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    :root {
+      --ink-900: #0b0f0d;
+      --ink-800: #101512;
+      --ink-700: #161d19;
+      --line-grid: #1f2b25;
+      --line-grid-major: #2c3b33;
+      --paper: #e9efe6;
+      --paper-dim: #aebcb2;
+      --phosphor: #5ffbb0;
+      --phosphor-dim: #2f9d6f;
+      --amber: #ffb43e;
+      --amber-dim: #a8763a;
+      --redline: #ff5d5d;
+      --mono: 'IBM Plex Mono', 'SF Mono', 'Courier New', monospace;
+      --sans: 'IBM Plex Sans', Arial, sans-serif;
+    }
+
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      src: local('Courier New');
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--ink-900);
+      color: var(--paper);
+      font-family: var(--sans);
+      overflow: hidden;
+    }
+
+    ::selection {
+      background: var(--phosphor);
+      color: var(--ink-900);
+    }
+
+    /* ================= LAYOUT ================= */
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ---- top title bar ---- */
+    #titlebar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 16px;
+      background: linear-gradient(180deg, var(--ink-700), var(--ink-800));
+      border-bottom: 1px solid var(--line-grid-major);
+      font-family: var(--mono);
+      letter-spacing: .06em;
+    }
+
+    #titlebar .mark {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--phosphor);
+    }
+
+    #titlebar .mark svg {
+      display: block;
+    }
+
+    #titlebar .divider {
+      width: 1px;
+      height: 18px;
+      background: var(--line-grid-major);
+    }
+
+    #titlebar .docname {
+      font-size: 12px;
+      color: var(--paper-dim);
+    }
+
+    #titlebar .docname input {
+      background: transparent;
+      border: none;
+      color: var(--paper);
+      font-family: var(--mono);
+      font-size: 12px;
+      width: 180px;
+      border-bottom: 1px dashed transparent;
+    }
+
+    #titlebar .docname input:focus {
+      outline: none;
+      border-bottom: 1px dashed var(--phosphor-dim);
+    }
+
+    #titlebar .spacer {
+      flex: 1;
+    }
+
+    #titlebar .coords {
+      font-size: 11px;
+      color: var(--phosphor-dim);
+      min-width: 170px;
+      text-align: right;
+    }
+
+    #titlebar .coords b {
+      color: var(--phosphor);
+      font-weight: 600;
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--line-grid-major);
+      background: var(--ink-700);
+      color: var(--paper);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .04em;
+      padding: 7px 12px;
+      border-radius: 2px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: border-color .12s, color .12s, background .12s;
+    }
+
+    .btn:hover {
+      border-color: var(--phosphor-dim);
+      color: var(--phosphor);
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn.primary {
+      background: var(--phosphor);
+      color: var(--ink-900);
+      border-color: var(--phosphor);
+      font-weight: 700;
+    }
+
+    .btn.primary:hover {
+      background: #7dffc4;
+      color: var(--ink-900);
+    }
+
+    .btn.ghost {
+      background: transparent;
+    }
+
+    .btn.danger:hover {
+      border-color: var(--redline);
+      color: var(--redline);
+    }
+
+    /* ---- middle: tool rail + canvas + side panel ---- */
+    #main {
+      display: grid;
+      grid-template-columns: 190px 1fr 0px;
+      min-height: 0;
+      position: relative;
+    }
+
+    #main.panel-open {
+      grid-template-columns: 190px 1fr 360px;
+    }
+
+    /* tool rail */
+    #toolrail {
+      background: var(--ink-800);
+      border-right: 1px solid var(--line-grid-major);
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 16px;
+      overflow-y: auto;
+      width: 190px;
+    }
+
+    .tool-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .section-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--phosphor-dim);
+      letter-spacing: 0.1em;
+      border-bottom: 1px solid var(--line-grid-major);
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .tool-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .tool-btn {
+      width: 100%;
+      height: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--ink-700);
+      border: 1px solid var(--line-grid-major);
+      border-radius: 4px;
+      color: var(--paper-dim);
+      cursor: pointer;
+      position: relative;
+      padding: 6px 2px;
+      gap: 4px;
+      transition: all 0.12s ease-in-out;
+    }
+
+    .tool-btn svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+    }
+
+    .tool-btn .btn-label {
+      font-family: var(--sans);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+
+    .tool-btn .arrow-indicator {
+      font-size: 7px;
+      color: var(--phosphor-dim);
+      margin-left: 2px;
+    }
+
+    .tool-btn:hover {
+      color: var(--paper);
+      background: #19221d;
+      border-color: var(--phosphor-dim);
+    }
+
+    .tool-btn.active {
+      color: var(--ink-900);
+      background: var(--phosphor);
+      border-color: var(--phosphor);
+      box-shadow: 0 0 8px rgba(95, 251, 176, 0.35);
+    }
+
+    /* Dropdown styling */
+    .tool-dropdown-container {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tool-dropdown-menu {
+      position: absolute;
+      left: 100%;
+      top: 0;
+      margin-left: 6px;
+      background: var(--ink-800);
+      border: 1px solid var(--line-grid-major);
+      border-radius: 4px;
+      padding: 4px;
+      z-index: 150;
+      display: none;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 135px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    .tool-dropdown-container:hover .tool-dropdown-menu {
+      display: flex;
+    }
+
+    .dropdown-option {
+      font-family: var(--mono);
+      font-size: 9.5px;
+      padding: 6px 8px;
+      color: var(--paper-dim);
+      cursor: pointer;
+      border-radius: 2px;
+      text-transform: uppercase;
+      text-align: left;
+      transition: all 0.1s ease;
+    }
+
+    .dropdown-option:hover {
+      background: var(--ink-700);
+      color: var(--phosphor);
+    }
+
+    .dropdown-option.active {
+      background: var(--phosphor-dim);
+      color: var(--ink-900);
+      font-weight: 700;
+    }
+
+    .rail-sep {
+      display: none;
+    }
+
+    /* canvas area */
+    #canvas-wrap {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 0%, #121915 0%, var(--ink-900) 70%);
+    }
+
+    #cad-canvas {
+      display: block;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    #live-dim {
+      position: absolute;
+      pointer-events: none;
+      z-index: 40;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--ink-900);
+      background: var(--amber);
+      padding: 4px 8px;
+      border-radius: 3px;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+    }
+
+    #live-dim::after {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 100%;
+      border: 5px solid transparent;
+      border-top-color: var(--amber);
+    }
+
+    #floating-status {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--phosphor-dim);
+      background: rgba(11, 15, 13, .7);
+      border: 1px solid var(--line-grid-major);
+      padding: 6px 10px;
+      border-radius: 2px;
+      pointer-events: none;
+      backdrop-filter: blur(2px);
+    }
+
+    #zoom-controls {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    #zoom-controls .btn {
+      width: 34px;
+      height: 30px;
+      justify-content: center;
+      padding: 0;
+    }
+
+    #snap-toggle-wrap {
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .pill {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: .04em;
+      padding: 5px 9px;
+      border-radius: 20px;
+      border: 1px solid var(--line-grid-major);
+      background: rgba(16, 21, 18, .75);
+      color: var(--paper-dim);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .pill.on {
+      color: var(--phosphor);
+      border-color: var(--phosphor-dim);
+    }
+
+    /* property mini-bar under titlebar, contextual */
+    #ctxbar {
+      position: absolute;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(16, 21, 18, .85);
+      border: 1px solid var(--line-grid-major);
+      padding: 6px 10px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--paper-dim);
+    }
+
+    #ctxbar label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    #ctxbar input[type=color] {
+      width: 20px;
+      height: 20px;
+      border: 1px solid var(--line-grid-major);
+      background: none;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    #ctxbar input[type=range] {
+      width: 70px;
+      accent-color: var(--phosphor);
+    }
+
+    #ctxbar input[type=number] {
+      width: 46px;
+      background: var(--ink-700);
+      border: 1px solid var(--line-grid-major);
+      color: var(--paper);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 4px;
+      border-radius: 2px;
+    }
+
+    #ctxbar select {
+      background: var(--ink-700);
+      border: 1px solid var(--line-grid-major);
+      color: var(--paper);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 4px;
+      border-radius: 2px;
+    }
+
+    /* ---- side reference panel ---- */
+    #refpanel {
+      background: var(--ink-800);
+      border-left: 1px solid var(--line-grid-major);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #refpanel-head {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--line-grid-major);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #refpanel-head h2 {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      letter-spacing: .08em;
+      color: var(--phosphor);
+      text-transform: uppercase;
+    }
+
+    #refpanel-head .close {
+      cursor: pointer;
+      color: var(--paper-dim);
+      font-family: var(--mono);
+      font-size: 16px;
+      background: none;
+      border: none;
+      line-height: 1;
+    }
+
+    #refpanel-head .close:hover {
+      color: var(--redline);
+    }
+
+    #ref-search {
+      margin: 10px 16px 6px;
+      display: flex;
+      gap: 6px;
+    }
+
+    #ref-search input {
+      flex: 1;
+      background: var(--ink-700);
+      border: 1px solid var(--line-grid-major);
+      color: var(--paper);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      padding: 7px 8px;
+      border-radius: 2px;
+    }
+
+    #ref-tabs {
+      display: flex;
+      gap: 2px;
+      padding: 0 16px 10px;
+      flex-wrap: wrap;
+    }
+
+    .ref-tab {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .03em;
+      padding: 4px 8px;
+      border: 1px solid var(--line-grid-major);
+      border-radius: 20px;
+      color: var(--paper-dim);
+      cursor: pointer;
+      background: transparent;
+    }
+
+    .ref-tab.on {
+      color: var(--phosphor);
+      border-color: var(--phosphor-dim);
+    }
+
+    #ref-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 16px 16px;
+    }
+
+    .ref-card {
+      border: 1px solid var(--line-grid-major);
+      border-radius: 3px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      background: var(--ink-700);
+    }
+
+    .ref-card .rc-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    .ref-card .rc-name {
+      font-family: var(--sans);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--paper);
+    }
+
+    .ref-card .rc-short {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-900);
+      background: var(--amber);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-weight: 700;
+      margin-left: 8px;
+    }
+
+    .ref-card .rc-body {
+      padding: 0 10px 10px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--paper-dim);
+      display: none;
+    }
+
+    .ref-card.open .rc-body {
+      display: block;
+    }
+
+    .ref-card .rc-cat {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--phosphor-dim);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-top: 4px;
+      display: block;
+    }
+
+    #refpanel-foot {
+      padding: 12px 16px;
+      border-top: 1px solid var(--line-grid-major);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #refpanel-foot .btn {
+      width: 100%;
+      justify-content: center;
+    }
+
+    #refpanel-foot .hint {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--paper-dim);
+      text-align: center;
+    }
+
+    /* ---- bottom status strip ---- */
+    #statusbar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 6px 16px;
+      background: var(--ink-800);
+      border-top: 1px solid var(--line-grid-major);
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--paper-dim);
+    }
+
+    #statusbar .seg {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #statusbar .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--phosphor);
+      box-shadow: 0 0 6px var(--phosphor);
+    }
+
+    #statusbar .spacer {
+      flex: 1;
+    }
+
+    /* ---- upload modal ---- */
+    #upload-modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 7, 6, .78);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      backdrop-filter: blur(3px);
+    }
+
+    #upload-modal-bg.show {
+      display: flex;
+    }
+
+    #upload-modal {
+      width: 420px;
+      background: var(--ink-800);
+      border: 1px solid var(--line-grid-major);
+      border-radius: 4px;
+      padding: 20px;
+    }
+
+    #upload-modal h3 {
+      margin: 0 0 4px;
+      font-family: var(--mono);
+      color: var(--phosphor);
+      font-size: 13px;
+      letter-spacing: .05em;
+    }
+
+    #upload-modal p {
+      margin: 0 0 14px;
+      font-size: 12px;
+      color: var(--paper-dim);
+      line-height: 1.5;
+    }
+
+    #drop-zone {
+      border: 1.5px dashed var(--line-grid-major);
+      border-radius: 4px;
+      padding: 26px 14px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .12s, background .12s;
+    }
+
+    #drop-zone:hover,
+    #drop-zone.drag {
+      border-color: var(--phosphor-dim);
+      background: rgba(95, 251, 176, .05);
+    }
+
+    #drop-zone svg {
+      width: 30px;
+      height: 30px;
+      stroke: var(--paper-dim);
+      margin-bottom: 8px;
+    }
+
+    #drop-zone .dz-label {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--paper);
+    }
+
+    #drop-zone .dz-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--paper-dim);
+      margin-top: 4px;
+    }
+
+    #upload-modal .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    #upload-status {
+      margin-top: 10px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--phosphor);
+      display: none;
+    }
+    /* ---- drag and drop overlay ---- */
+    #drag-drop-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(11, 15, 13, 0.85);
+      border: 2px dashed var(--phosphor);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 180;
+      backdrop-filter: blur(4px);
+    }
+    #drag-drop-overlay.dragover {
+      display: flex;
+    }
+    .dd-box {
+      background: #121915;
+      border: 1px solid var(--line-grid-major);
+      border-radius: 6px;
+      padding: 30px 45px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      animation: ddPulse 1.8s infinite ease-in-out;
+    }
+    .dd-title {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--phosphor);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .dd-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--paper-dim);
+    }
+    @keyframes ddPulse {
+      0% { box-shadow: 0 0 12px rgba(95, 251, 176, 0.1); border-color: var(--line-grid-major); }
+      50% { box-shadow: 0 0 24px rgba(95, 251, 176, 0.3); border-color: var(--phosphor-dim); }
+      100% { box-shadow: 0 0 12px rgba(95, 251, 176, 0.1); border-color: var(--line-grid-major); }
+    }
+
+    /* ---- color swatches ---- */
+    .color-swatches {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.1s ease;
+      display: inline-block;
+    }
+    .swatch:hover {
+      transform: scale(1.2);
+      border-color: rgba(255, 255, 255, 0.7);
+    }
+    .swatch.active {
+      transform: scale(1.3);
+      border-color: #ffffff;
+      box-shadow: 0 0 6px var(--glow-color);
+    }
+
+    /* scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--ink-800);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--line-grid-major);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--phosphor-dim);
+    }
+
+    @media (max-width:900px) {
+      #main {
+        grid-template-columns: 54px 1fr 0px;
+      }
+      #main.panel-open {
+        grid-template-columns: 54px 1fr;
+      }
+
+      #refpanel {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 300px;
+        z-index: 60;
+        box-shadow: -8px 0 24px rgba(0, 0, 0, .4);
+      }
+
+      #toolrail {
+        width: 54px;
+        padding: 8px 4px;
+        gap: 8px;
+      }
+
+      .tool-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tool-btn {
+        height: 38px;
+        padding: 0;
+      }
+
+      .tool-btn .btn-label {
+        display: none;
+      }
+
+      .section-title {
+        display: none;
+      }
+
+      .tool-dropdown-menu {
+        left: 48px;
+      }
+
+      #titlebar .coords {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- TITLE BAR -->
+    <div id="titlebar">
+      <div class="mark">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <path d="M3 21V3h6l4 4h8v14H3z" stroke="currentColor" stroke-width="1.6" fill="none"
+            stroke-linejoin="round" />
+          <path d="M7 21v-7l4-4 4 4v7" stroke="currentColor" stroke-width="1.6" fill="none" />
+        </svg>
+        DRAFT/2
+      </div>
+      <div class="divider"></div>
+      <div class="docname">SHEET <input id="doc-title" value="UNTITLED-01" spellcheck="false"></div>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="open-ref-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+        TOOL REFERENCE
+      </button>
+      <button class="btn ghost" id="import-cra-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M12 17V3m0 0L8 7m4-4l4 4M4 21h16" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        IMPORT (.CRA)
+      </button>
+      <button class="btn ghost" id="export-cra-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M12 3v14m0 0l-4-4m4 4l4-4M4 21h16" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        DOWNLOAD (.CRA)
+      </button>
+      <input type="file" id="import-cra-file" accept=".cra" style="display:none;">
+      <button class="btn ghost" id="export-pdf-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" />
+        </svg>
+        EXPORT DRAWING (PDF)
+      </button>
+      <div class="coords" id="coord-readout">X 0.00 Y 0.00</div>
+    </div>
+
+    <!-- MAIN -->
+    <div id="main">
+
+      <!-- TOOL RAIL -->
+      <div id="toolrail">
+        <!-- WORKSPACE SECTION -->
+        <div class="tool-section">
+          <div class="section-title">Workspace</div>
+          <div class="tool-grid">
+            <button class="tool-btn active" data-tool="select" title="Select (V)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M5 3l14 7-6 2-2 6-6-15z" stroke-linejoin="round" />
+              </svg>
+              <span class="btn-label">Select</span>
+            </button>
+            <button class="tool-btn" data-tool="pan" title="Pan (H)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 8 8h0a8 8 0 0 0 8-8v-3a2 2 0 0 0-4 0" />
+              </svg>
+              <span class="btn-label">Pan</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TOOL BOX SECTION -->
+        <div class="tool-section">
+          <div class="section-title">Tool Box</div>
+          <div class="tool-grid">
+            <button class="tool-btn" data-tool="line" title="Line (L)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M4 20L20 4" />
+                <circle cx="4" cy="20" r="1.6" fill="currentColor" />
+                <circle cx="20" cy="4" r="1.6" fill="currentColor" />
+              </svg>
+              <span class="btn-label">Line</span>
+            </button>
+            <button class="tool-btn" data-tool="freehand" title="Freehand / Pen">
+              <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linejoin="round">
+                <path d="M3 16l4-4 4 4 4-4 6 6" />
+              </svg>
+              <span class="btn-label">Freehand</span>
+            </button>
+            
+            <!-- Rectangle Dropdown -->
+            <div class="tool-dropdown-container">
+              <button class="tool-btn" data-tool="rect" title="Rectangle (REC / R)">
+                <svg viewBox="0 0 24 24" stroke-width="1.8">
+                  <rect x="4" y="6" width="16" height="12" rx="0.5" />
+                </svg>
+                <span class="btn-label">Rectangle <span class="arrow-indicator">▼</span></span>
+              </button>
+              <div class="tool-dropdown-menu">
+                <div class="dropdown-option active" data-subtool="rect-2corner">2 Corner</div>
+                <div class="dropdown-option" data-subtool="rect-center">From Center</div>
+                <div class="dropdown-option" data-subtool="rect-3corner">3 Corner</div>
+              </div>
+            </div>
+
+            <!-- Arc Dropdown -->
+            <div class="tool-dropdown-container">
+              <button class="tool-btn" data-tool="arc" title="Arc (A)">
+                <svg viewBox="0 0 24 24" stroke-width="1.8">
+                  <path d="M4 18a12 12 0 0 1 16-16" fill="none" />
+                </svg>
+                <span class="btn-label">Arc Tool <span class="arrow-indicator">▼</span></span>
+              </button>
+              <div class="tool-dropdown-menu">
+                <div class="dropdown-option active" data-subtool="arc-3point">3-Pt Arc</div>
+                <div class="dropdown-option" data-subtool="arc-sce">Start-Center-End</div>
+                <div class="dropdown-option" data-subtool="arc-cse">Center-Start-End</div>
+              </div>
+            </div>
+
+            <!-- Circle Dropdown -->
+            <div class="tool-dropdown-container">
+              <button class="tool-btn" data-tool="circle" title="Circle (C)">
+                <svg viewBox="0 0 24 24" stroke-width="1.8">
+                  <circle cx="12" cy="12" r="8" />
+                </svg>
+                <span class="btn-label">Circle <span class="arrow-indicator">▼</span></span>
+              </button>
+              <div class="tool-dropdown-menu">
+                <div class="dropdown-option active" data-subtool="circle-center">Center</div>
+                <div class="dropdown-option" data-subtool="circle-tantan">Tan-Tan</div>
+                <div class="dropdown-option" data-subtool="circle-tantantan">3-Tan</div>
+              </div>
+            </div>
+
+            <button class="tool-btn" data-tool="text" title="Multiline Text (MT)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M5 5h14M12 5v14" />
+              </svg>
+              <span class="btn-label">Text Bar</span>
+            </button>
+
+            <button class="tool-btn" data-tool="ellipse" title="Ellipse (EL)" style="grid-column: span 2; height: 48px;">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <ellipse cx="12" cy="12" rx="9" ry="5.5" />
+              </svg>
+              <span class="btn-label">Ellipse / Oval Tool</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- OTHER TOOLS SECTION -->
+        <div class="tool-section">
+          <div class="section-title">Other Tools</div>
+          <div class="tool-grid">
+            <button class="tool-btn" data-tool="dim" title="Dimension (DLI / D)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M4 6v4M20 6v4M4 8h16" />
+                <path d="M4 8l3-1.4M4 8l3 1.4M20 8l-3-1.4M20 8l-3 1.4" />
+              </svg>
+              <span class="btn-label">Dimension</span>
+            </button>
+            <button class="tool-btn" data-tool="move" title="Move (M)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3" />
+              </svg>
+              <span class="btn-label">Move</span>
+            </button>
+            <button class="tool-btn" data-tool="trim" title="Trim (TR / T)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M5 5l14 14M19 5L5 19" />
+              </svg>
+              <span class="btn-label">Trim</span>
+            </button>
+            <button class="tool-btn" data-tool="hatch" title="Hatch (H)">
+              <svg viewBox="0 0 24 24" stroke-width="1.4">
+                <rect x="4" y="4" width="16" height="16" />
+                <path d="M4 16l8-12M4 20l16-16M8 20l12-14M12 20l8-10M16 20l4-6" stroke-width="1" />
+              </svg>
+              <span class="btn-label">Hatch</span>
+            </button>
+            <button class="tool-btn" data-tool="delete" title="Erase (E)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M3 7h18M8 7V4h8v3M6 7l1 14h10l1-14" />
+              </svg>
+              <span class="btn-label">Delete</span>
+            </button>
+            <button class="tool-btn" data-tool="polyline" title="Polyline (PL)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linejoin="round">
+                <path d="M3 18l5-10 6 4 7-9" />
+              </svg>
+              <span class="btn-label">Polyline</span>
+            </button>
+            <button class="tool-btn" data-tool="undo" title="Undo (CTRL+Z)">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <path d="M9 7L3 12l6 5M3 12h12a5 5 0 0 1 0 10h-1" />
+              </svg>
+              <span class="btn-label">Undo</span>
+            </button>
+            <button class="tool-btn" data-tool="clear" title="Clear sheet">
+              <svg viewBox="0 0 24 24" stroke-width="1.8">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M8 8l8 8" />
+              </svg>
+              <span class="btn-label">Clear</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CANVAS -->
+      <div id="canvas-wrap">
+        <div id="drag-drop-overlay">
+          <div class="dd-box">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--phosphor)" stroke-width="1.8">
+              <path d="M12 17V3m0 0L8 7m4-4l4 4M4 21h16" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="dd-title">Drop .CRA Drawing Here</div>
+            <div class="dd-sub">This will load and replace the current sheet</div>
+          </div>
+        </div>
+        <canvas id="cad-canvas"></canvas>
+
+        <div id="snap-toggle-wrap">
+          <div class="pill on" id="grid-toggle">GRID</div>
+          <div class="pill on" id="snap-toggle">SNAP</div>
+          <div class="pill" id="ortho-toggle">ORTHO</div>
+          <div class="pill on" id="endpoint-snap-toggle">CONNECT</div>
+          <div class="pill on" id="tangent-snap-toggle">TANGENT</div>
+        </div>
+
+        <div id="ctxbar" style="display:none;"></div>
+
+        <div id="live-dim" style="display:none;"></div>
+
+        <div id="floating-status">READY</div>
+
+        <div id="zoom-controls">
+          <button class="btn" id="zoom-in">+</button>
+          <button class="btn" id="zoom-reset">⤢</button>
+          <button class="btn" id="zoom-out">–</button>
+        </div>
+      </div>
+
+      <!-- REFERENCE PANEL -->
+      <div id="refpanel">
+        <div id="refpanel-head">
+          <h2>Tool Reference</h2>
+          <button class="close" id="close-ref-btn">✕</button>
+        </div>
+        <div id="ref-search">
+          <input id="ref-search-input" placeholder="search command or shortcut…" spellcheck="false">
+        </div>
+        <div id="ref-tabs"></div>
+        <div id="ref-list"></div>
+        <div id="refpanel-foot">
+          <button class="btn ghost" id="upload-pdf-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M12 16V4m0 0L7 9m5-5l5 5M5 20h14" />
+            </svg>
+            UPLOAD REFERENCE PDF
+          </button>
+          <button class="btn primary" id="export-ref-pdf-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" />
+            </svg>
+            EXPORT REFERENCE (PDF)
+          </button>
+          <div class="hint" id="ref-source-hint">SOURCE: AutoCAD_Tools_and_Uses_Guide.pdf · 23 commands · 5 modules
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATUS BAR -->
+    <div id="statusbar">
+      <div class="seg"><span class="dot"></span> DRAFT/2 ENGINE</div>
+      <div class="seg" id="status-tool">TOOL: SELECT</div>
+      <div class="seg" id="status-objs">OBJECTS: 0</div>
+      <div class="seg" id="status-zoom">ZOOM: 100%</div>
+      <div class="spacer"></div>
+      <div class="seg" id="status-units">UNITS: MM</div>
+    </div>
+  </div>
+
+  <!-- UPLOAD MODAL -->
+  <div id="upload-modal-bg">
+    <div id="upload-modal">
+      <h3>UPLOAD REFERENCE PDF</h3>
+      <p>Drop in your own AutoCAD tools PDF to replace the loaded reference set, or use the bundled guide already parsed
+        into the panel.</p>
+      <div id="drop-zone">
+        <svg viewBox="0 0 24 24" stroke-width="1.6" fill="none">
+          <path d="M12 16V4m0 0L7 9m5-5l5 5M5 20h14" />
+        </svg>
+        <div class="dz-label">CLICK TO BROWSE OR DROP .PDF HERE</div>
+        <div class="dz-sub">parsed client-side · nothing leaves this tab</div>
+        <input type="file" id="file-input" accept="application/pdf" style="display:none;">
+      </div>
+      <div id="upload-status"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="cancel-upload-btn">CANCEL</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    /* ============================================================
+       DRAFT/2 — lightweight 2D CAD canvas
+       ============================================================ */
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+
+    const canvas = document.getElementById('cad-canvas');
+    const ctx = canvas.getContext('2d');
+    const wrap = document.getElementById('canvas-wrap');
+
+    let view = { ox: 0, oy: 0, scale: 1 };  // pan offset (screen px) + zoom
+    let grid = 20; // px at scale 1
+    let showGrid = true, snapOn = true, orthoOn = false;
+    let objects = [];   // committed shapes
+    let undoStack = [];
+    let currentTool = 'select';
+    let drawing = null; // in-progress shape
+    let mouse = { x: 0, y: 0, wx: 0, wy: 0 };
+    let selected = null;
+    let hoveredObj = null;
+    let dimAngleFirstLine = null;
+    let isPanning = false, panStart = null;
+    let polyPoints = [];
+    let activeParallelRelation = null;
+    let activeTangentMarker = null;
+    let tangentSnapOn = true;
+    let isInitializing = false;
+    let selectionBox = null;
+
+    const COLORS = ['#ffffff', '#5ffbb0', '#ffb43e', '#ff5d5d', '#7ec8ff', '#e9efe6', '#c792ea'];
+    let currentColor = '#ffffff';
+    let currentWidth = 1.6;
+    let currentLineType = 'solid';
+
+    function resizeCanvas() {
+      const r = wrap.getBoundingClientRect();
+      canvas.width = r.width * devicePixelRatio;
+      canvas.height = r.height * devicePixelRatio;
+      canvas.style.width = r.width + 'px';
+      canvas.style.height = r.height + 'px';
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      render();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    function worldToScreen(x, y) { return [x * view.scale + view.ox, y * view.scale + view.oy]; }
+    function screenToWorld(x, y) { return [(x - view.ox) / view.scale, (y - view.oy) / view.scale]; }
+
+    function snapPoint(wx, wy) {
+      activeTrackingGuides = { h: null, v: null };
+
+      // 1. try snapping to an existing object's endpoint/vertex/center first — takes priority
+      const endpointSnap = findNearestEndpoint(wx, wy);
+      if (endpointSnap) {
+        return endpointSnap.pt;
+      }
+
+      // 2. try tangent snap
+      const tangentSnap = getTangentSnapPoint(wx, wy);
+      if (tangentSnap) {
+        return tangentSnap;
+      }
+
+      // 3. try alignment guides
+      const [alignX, alignY] = checkAlignmentSnaps(wx, wy);
+      if (activeTrackingGuides.h || activeTrackingGuides.v) {
+        return [alignX, alignY];
+      }
+
+      if (!snapOn) return [wx, wy];
+      const g = grid;
+      return [Math.round(wx / g) * g, Math.round(wy / g) * g];
+    }
+
+    // Collects candidate snap points (endpoints, corners, vertices, centers) from
+    // all committed objects. Sets activeSnapMarker as a side effect (for the visual
+    // indicator) and returns the closest match within screen-pixel tolerance, or null.
+    function findNearestEndpoint(wx, wy) {
+      if (!endpointSnapOn) { activeSnapMarker = null; return null; }
+      const tolWorld = 10 / view.scale; // ~10px on screen regardless of zoom
+      let best = null, bestDist = tolWorld;
+
+      function consider(pt, kind) {
+        const d = Math.hypot(pt[0] - wx, pt[1] - wy);
+        if (d < bestDist) { bestDist = d; best = { pt: [pt[0], pt[1]], kind }; }
+      }
+
+      objects.forEach(o => {
+        if (o.type === 'line' || o.type === 'dim') {
+          consider(o.p1, 'endpoint'); consider(o.p2, 'endpoint');
+          consider([(o.p1[0] + o.p2[0]) / 2, (o.p1[1] + o.p2[1]) / 2], 'midpoint');
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          const x1 = o.p1[0], y1 = o.p1[1], x2 = o.p2[0], y2 = o.p2[1];
+          // Corners
+          [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].forEach(p => consider(p, 'corner'));
+          // Edges midpoints
+          consider([(x1 + x2) / 2, y1], 'midpoint');
+          consider([(x1 + x2) / 2, y2], 'midpoint');
+          consider([x1, (y1 + y2) / 2], 'midpoint');
+          consider([x2, (y1 + y2) / 2], 'midpoint');
+          // Geometric Center
+          consider([(x1 + x2) / 2, (y1 + y2) / 2], 'center');
+        } else if (o.type === 'polyline') {
+          o.pts.forEach(p => consider(p, 'endpoint'));
+          // Midpoint of each segment
+          for (let i = 0; i < o.pts.length - 1; i++) {
+            consider([(o.pts[i][0] + o.pts[i+1][0]) / 2, (o.pts[i][1] + o.pts[i+1][1]) / 2], 'midpoint');
+          }
+        } else if (o.type === 'circle') {
+          consider(o.c, 'center');
+          // Quadrants
+          consider([o.c[0], o.c[1] - o.r], 'quadrant');
+          consider([o.c[0], o.c[1] + o.r], 'quadrant');
+          consider([o.c[0] - o.r, o.c[1]], 'quadrant');
+          consider([o.c[0] + o.r, o.c[1]], 'quadrant');
+        } else if (o.type === 'arc') {
+          consider(o.c, 'center');
+          // Arc endpoints
+          const pStart = [o.c[0] + o.r * Math.cos(o.a0), o.c[1] + o.r * Math.sin(o.a0)];
+          const pEnd = [o.c[0] + o.r * Math.cos(o.a1), o.c[1] + o.r * Math.sin(o.a1)];
+          consider(pStart, 'endpoint');
+          consider(pEnd, 'endpoint');
+          // Arc midpoint
+          let diff = o.a1 - o.a0;
+          if (o.ccw) {
+            if (diff > 0) diff -= 2 * Math.PI;
+          } else {
+            if (diff < 0) diff += 2 * Math.PI;
+          }
+          const midAngle = o.a0 + diff / 2;
+          const midPt = [o.c[0] + o.r * Math.cos(midAngle), o.c[1] + o.r * Math.sin(midAngle)];
+          consider(midPt, 'midpoint');
+        } else if (o.type === 'ellipse') {
+          consider(o.c, 'center');
+        } else if (o.type === 'text') {
+          consider(o.p, 'endpoint');
+        }
+      });
+
+      // also snap to the in-progress drawing's own start point (closing a shape)
+      if (drawing) {
+        if (drawing.p1) consider(drawing.p1, 'endpoint');
+        if (drawing.pts && drawing.pts.length) consider(drawing.pts[0], 'endpoint');
+      }
+
+      activeSnapMarker = best;
+      return best;
+    }
+    let activeSnapMarker = null;
+    let endpointSnapOn = true;
+
+    function applyOrtho(p0, p1) {
+      if (!orthoOn) return p1;
+      const dx = Math.abs(p1[0] - p0[0]), dy = Math.abs(p1[1] - p0[1]);
+      return dx > dy ? [p1[0], p0[1]] : [p0[0], p1[1]];
+    }
+
+    /* ---------------- RENDER ---------------- */
+    function render() {
+      const r = wrap.getBoundingClientRect();
+      ctx.clearRect(0, 0, r.width, r.height);
+      ctx.fillStyle = '#0b0f0d';
+      ctx.fillRect(0, 0, r.width, r.height);
+
+      if (showGrid) drawGrid(r);
+
+      // committed objects
+      objects.forEach(obj => drawObject(obj, isSelected(obj), false, obj === hoveredObj));
+      // in-progress
+      if (drawing) drawObject(drawing, false, true);
+
+      // Draw highlighted selected tangent segments when creating circle-tantan or circle-tantantan
+      if ((currentTool === 'circle' && (activeSubtool === 'circle-tantan' || activeSubtool === 'circle-tantantan')) && polyPoints.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#ffb43e'; // amber color for selection highlight
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#ffb43e';
+        ctx.shadowBlur = 4;
+        polyPoints.forEach(seg => {
+          if (seg && seg.p1 && seg.p2) {
+            const [x1, y1] = worldToScreen(...seg.p1);
+            const [x2, y2] = worldToScreen(...seg.p2);
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          }
+        });
+        ctx.restore();
+      }
+
+      // crosshair
+      if (currentTool !== 'select' && currentTool !== 'pan') {
+        drawCrosshair();
+      }
+
+      // endpoint snap indicator (drawn last so it's always visible on top)
+      if (activeSnapMarker && currentTool !== 'select' && currentTool !== 'pan') {
+        drawSnapMarker(activeSnapMarker);
+      }
+
+      // parallel snap indicator
+      if (activeParallelRelation && currentTool !== 'select' && currentTool !== 'pan') {
+        drawParallelIndicator(activeParallelRelation);
+      }
+
+      // tangent snap indicator
+      if (activeTangentMarker && currentTool !== 'select' && currentTool !== 'pan') {
+        drawTangentMarker(activeTangentMarker);
+      }
+
+      // alignment snap indicator
+      if ((activeTrackingGuides.h || activeTrackingGuides.v) && currentTool !== 'select' && currentTool !== 'pan') {
+        drawAlignmentGuides();
+      }
+
+      // Drag selection box
+      if (selectionBox && currentTool === 'select') {
+        drawSelectionBox(selectionBox);
+      }
+    }
+
+    function drawSnapMarker(snap) {
+      const [x, y] = worldToScreen(...snap.pt);
+      ctx.save();
+      ctx.strokeStyle = '#ffb43e';
+      ctx.fillStyle = '#ffb43e';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = '#ffb43e';
+      ctx.shadowBlur = 6;
+      if (snap.kind === 'endpoint') {
+        ctx.strokeRect(x - 6, y - 6, 12, 12);
+      } else if (snap.kind === 'midpoint') {
+        ctx.beginPath();
+        ctx.moveTo(x - 7, y + 6); ctx.lineTo(x, y - 6); ctx.lineTo(x + 7, y + 6); ctx.closePath();
+        ctx.stroke();
+      } else if (snap.kind === 'center') {
+        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y); ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3); ctx.stroke();
+      } else if (snap.kind === 'corner') {
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y - 6); ctx.moveTo(x - 6, y - 6); ctx.lineTo(x - 6, y + 6);
+        ctx.moveTo(x + 6, y + 6); ctx.lineTo(x - 6, y + 6); ctx.moveTo(x + 6, y + 6); ctx.lineTo(x + 6, y - 6);
+        ctx.stroke();
+      } else if (snap.kind === 'quadrant') {
+        ctx.beginPath();
+        ctx.moveTo(x, y - 6);
+        ctx.lineTo(x + 6, y);
+        ctx.lineTo(x, y + 6);
+        ctx.lineTo(x - 6, y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // small label so it's unambiguous what just happened
+      ctx.save();
+      ctx.font = '9.5px IBM Plex Mono, monospace';
+      ctx.fillStyle = '#ffb43e';
+      ctx.fillText(snap.kind.toUpperCase(), x + 10, y - 10);
+      ctx.restore();
+    }
+
+    function getAllSegments() {
+      const segments = [];
+      objects.forEach(o => {
+        if (o.type === 'line' || o.type === 'dim') {
+          segments.push({ p1: o.p1, p2: o.p2, parent: o });
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          const x1 = o.p1[0], y1 = o.p1[1], x2 = o.p2[0], y2 = o.p2[1];
+          segments.push({ p1: [x1, y1], p2: [x2, y1], parent: o });
+          segments.push({ p1: [x2, y1], p2: [x2, y2], parent: o });
+          segments.push({ p1: [x2, y2], p2: [x1, y2], parent: o });
+          segments.push({ p1: [x1, y2], p2: [x1, y1], parent: o });
+        } else if (o.type === 'polyline') {
+          for (let i = 0; i < o.pts.length - 1; i++) {
+            segments.push({ p1: o.pts[i], p2: o.pts[i + 1], parent: o });
+          }
+        }
+      });
+      if (currentTool === 'polyline' && polyPoints.length > 1) {
+        for (let i = 0; i < polyPoints.length - 1; i++) {
+          segments.push({ p1: polyPoints[i], p2: polyPoints[i + 1], parent: null });
+        }
+      }
+      return segments;
+    }
+
+    function getParallelSnap(pStart, wx, wy) {
+      const segs = getAllSegments();
+      let bestSeg = null;
+      let minDiff = 0.05; // tolerance (~3 degrees)
+      let bestSnapPt = null;
+
+      segs.forEach(seg => {
+        let thetaS = Math.atan2(seg.p2[1] - seg.p1[1], seg.p2[0] - seg.p1[0]);
+        if (thetaS < 0) thetaS += Math.PI;
+
+        let thetaC = Math.atan2(wy - pStart[1], wx - pStart[0]);
+        if (thetaC < 0) thetaC += Math.PI;
+
+        let diff = Math.abs(thetaC - thetaS);
+        diff = Math.min(diff, Math.PI - diff);
+
+        if (diff < minDiff) {
+          const cosS = Math.cos(thetaS);
+          const sinS = Math.sin(thetaS);
+          const dx = wx - pStart[0];
+          const dy = wy - pStart[1];
+          const d = dx * cosS + dy * sinS;
+          const snapPt = [pStart[0] + d * cosS, pStart[1] + d * sinS];
+
+          const screenCurrent = worldToScreen(wx, wy);
+          const screenSnap = worldToScreen(snapPt[0], snapPt[1]);
+          const distPx = Math.hypot(screenCurrent[0] - screenSnap[0], screenCurrent[1] - screenSnap[1]);
+
+          if (distPx < 35) {
+            minDiff = diff;
+            bestSeg = seg;
+            bestSnapPt = snapPt;
+          }
+        }
+      });
+
+      if (bestSeg && bestSnapPt) {
+        return { pt: bestSnapPt, ref: bestSeg, p1: pStart };
+      }
+      return null;
+    }
+
+    function drawParallelIndicator(relation) {
+      const ref = relation.ref;
+      const p1 = relation.p1;
+      const p2 = relation.pt;
+
+      const refMid = [
+        (ref.p1[0] + ref.p2[0]) / 2,
+        (ref.p1[1] + ref.p2[1]) / 2
+      ];
+      const curMid = [
+        (p1[0] + p2[0]) / 2,
+        (p1[1] + p2[1]) / 2
+      ];
+
+      const screenRefMid = worldToScreen(...refMid);
+      const screenCurMid = worldToScreen(...curMid);
+      const screenRefP1 = worldToScreen(...ref.p1);
+      const screenRefP2 = worldToScreen(...ref.p2);
+
+      ctx.save();
+
+      // Glow highlight on reference segment
+      ctx.strokeStyle = 'rgba(255, 180, 62, 0.4)';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(screenRefP1[0], screenRefP1[1]);
+      ctx.lineTo(screenRefP2[0], screenRefP2[1]);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'var(--amber)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(screenRefP1[0], screenRefP1[1]);
+      ctx.lineTo(screenRefP2[0], screenRefP2[1]);
+      ctx.stroke();
+
+      // Dashed connector
+      ctx.strokeStyle = 'rgba(255, 180, 62, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(screenRefMid[0], screenRefMid[1]);
+      ctx.lineTo(screenCurMid[0], screenCurMid[1]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      function drawGlyph(mx, my, angle) {
+        ctx.save();
+        ctx.translate(mx, my);
+        ctx.rotate(angle);
+        ctx.strokeStyle = 'var(--amber)';
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = 'var(--amber)';
+        ctx.shadowBlur = 4;
+        ctx.beginPath();
+        ctx.moveTo(-4, -6);
+        ctx.lineTo(0, 6);
+        ctx.moveTo(1, -6);
+        ctx.lineTo(5, 6);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      const angleRef = Math.atan2(ref.p2[1] - ref.p1[1], ref.p2[0] - ref.p1[0]);
+      const angleCur = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
+
+      drawGlyph(screenRefMid[0], screenRefMid[1], angleRef);
+      drawGlyph(screenCurMid[0], screenCurMid[1], angleCur);
+
+      const screenCursor = worldToScreen(...p2);
+      ctx.fillStyle = 'var(--amber)';
+      ctx.font = '700 10px IBM Plex Mono, monospace';
+      ctx.shadowColor = 'black';
+      ctx.shadowBlur = 4;
+      ctx.fillText('PARALLEL', screenCursor[0] + 15, screenCursor[1] - 5);
+
+      ctx.restore();
+    }
+
+    function getTangentSnapPoint(wx, wy) {
+      if (!tangentSnapOn) { activeTangentMarker = null; return null; }
+      if (!drawing) { activeTangentMarker = null; return null; }
+      if (drawing.type !== 'line' && drawing.type !== 'dim' && drawing.type !== 'polyline') {
+        activeTangentMarker = null;
+        return null;
+      }
+      const pStart = (drawing.type === 'polyline') ? polyPoints[polyPoints.length - 1] : drawing.p1;
+      if (!pStart) { activeTangentMarker = null; return null; }
+
+      const tolWorld = 12 / view.scale; // 12 screen pixels tolerance
+      let bestPt = null, bestDist = tolWorld;
+      let bestObj = null;
+
+      objects.forEach(o => {
+        if (o.type === 'circle' || o.type === 'arc') {
+          const cx = o.c[0], cy = o.c[1], r = o.r;
+          const d = Math.hypot(pStart[0] - cx, pStart[1] - cy);
+          if (d > r + 0.01) {
+            const alpha = Math.atan2(pStart[1] - cy, pStart[0] - cx);
+            const beta = Math.acos(r / d);
+
+            // Two candidate tangent points
+            const candidates = [
+              [cx + r * Math.cos(alpha + beta), cy + r * Math.sin(alpha + beta)],
+              [cx + r * Math.cos(alpha - beta), cy + r * Math.sin(alpha - beta)]
+            ];
+
+            candidates.forEach(pt => {
+              if (o.type === 'arc') {
+                let t = Math.atan2(pt[1] - cy, pt[0] - cx);
+                let angleDiff = (t - o.a0) % (2 * Math.PI);
+                if (angleDiff < 0) angleDiff += 2 * Math.PI;
+                let arcLength = (o.a1 - o.a0) % (2 * Math.PI);
+                if (arcLength < 0) arcLength += 2 * Math.PI;
+                if (angleDiff > arcLength + 0.001) return; // not on arc
+              }
+
+              const dist = Math.hypot(pt[0] - wx, pt[1] - wy);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestPt = pt;
+                bestObj = o;
+              }
+            });
+          }
+        }
+      });
+
+      if (bestPt) {
+        activeTangentMarker = { pt: bestPt, obj: bestObj };
+        return bestPt;
+      }
+      activeTangentMarker = null;
+      return null;
+    }
+
+    function drawTangentMarker(snap) {
+      const [x, y] = worldToScreen(...snap.pt);
+      ctx.save();
+      ctx.strokeStyle = '#5ffbb0'; // neon green (standard snap color)
+      ctx.fillStyle = '#5ffbb0';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = '#5ffbb0';
+      ctx.shadowBlur = 6;
+
+      // Tangent symbol: circle with a horizontal line tangent to the top of it
+      ctx.beginPath();
+      ctx.arc(x, y + 2, 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y - 3);
+      ctx.lineTo(x + 8, y - 3);
+      ctx.stroke();
+
+      ctx.font = '9.5px IBM Plex Mono, monospace';
+      ctx.fillText('TANGENT', x + 12, y - 8);
+      ctx.restore();
+    }
+
+    function isSelected(obj) {
+      if (!selected) return false;
+      if (Array.isArray(selected)) return selected.includes(obj);
+      return selected === obj;
+    }
+
+    function drawSelectionBox(box) {
+      const [x1, y1] = worldToScreen(...box.p1);
+      const [x2, y2] = worldToScreen(...box.p2);
+      const w = x2 - x1;
+      const h = y2 - y1;
+
+      ctx.save();
+      ctx.setLineDash([]);
+      
+      if (w >= 0) {
+        // Window selection (Blue)
+        ctx.strokeStyle = '#00aaff';
+        ctx.fillStyle = 'rgba(0, 170, 255, 0.15)';
+        ctx.fillRect(x1, y1, w, h);
+        ctx.strokeRect(x1, y1, w, h);
+      } else {
+        // Crossing selection (Green)
+        ctx.strokeStyle = '#5ffbb0';
+        ctx.fillStyle = 'rgba(95, 251, 176, 0.15)';
+        ctx.setLineDash([5, 5]);
+        ctx.fillRect(x1, y1, w, h);
+        ctx.strokeRect(x1, y1, w, h);
+      }
+      
+      ctx.restore();
+    }
+
+    function selectObjectsInBox(box) {
+      const x1 = Math.min(box.p1[0], box.p2[0]);
+      const x2 = Math.max(box.p1[0], box.p2[0]);
+      const y1 = Math.min(box.p1[1], box.p2[1]);
+      const y2 = Math.max(box.p1[1], box.p2[1]);
+      
+      const isCrossing = (box.p2[0] - box.p1[0]) < 0; // Dragging left is crossing
+
+      const selectedList = [];
+
+      objects.forEach(o => {
+        if (isCrossing) {
+          if (objectIntersectsBox(o, x1, y1, x2, y2)) {
+            selectedList.push(o);
+          }
+        } else {
+          if (objectEntirelyInBox(o, x1, y1, x2, y2)) {
+            selectedList.push(o);
+          }
+        }
+      });
+
+      return selectedList;
+    }
+
+    function objectIntersectsBox(o, bx1, by1, bx2, by2) {
+      const inBox = (p) => p && p[0] >= bx1 && p[0] <= bx2 && p[1] >= by1 && p[1] <= by2;
+
+      // 1. If any vertex or endpoint is inside the box, it intersects!
+      if (o.p1 && inBox(o.p1)) return true;
+      if (o.p2 && inBox(o.p2)) return true;
+      if (o.c && inBox(o.c)) return true;
+      if (o.p && inBox(o.p)) return true;
+      if (o.pts && o.pts.some(inBox)) return true;
+
+      // 2. Check segment intersections with the 4 box edges
+      const boxEdges = [
+        [[bx1, by1], [bx2, by1]], // Top
+        [[bx2, by1], [bx2, by2]], // Right
+        [[bx2, by2], [bx1, by2]], // Bottom
+        [[bx1, by2], [bx1, by1]]  // Left
+      ];
+
+      const segs = [];
+      if (o.type === 'line' || o.type === 'dim') {
+        segs.push({ p1: o.p1, p2: o.p2 });
+      } else if (o.type === 'rect' || o.type === 'hatch') {
+        segs.push({ p1: o.p1, p2: [o.p2[0], o.p1[1]] });
+        segs.push({ p1: [o.p2[0], o.p1[1]], p2: o.p2 });
+        segs.push({ p1: o.p2, p2: [o.p1[0], o.p2[1]] });
+        segs.push({ p1: [o.p1[0], o.p2[1]], p2: o.p1 });
+      } else if (o.type === 'polyline' || o.type === 'freehand') {
+        for (let i = 0; i < o.pts.length - 1; i++) {
+          segs.push({ p1: o.pts[i], p2: o.pts[i + 1] });
+        }
+      }
+
+      // Check if any object segment crosses a box edge
+      for (let s of segs) {
+        for (let edge of boxEdges) {
+          if (getLineIntersection(s.p1, s.p2, edge[0], edge[1])) {
+            return true;
+          }
+        }
+      }
+
+      // 3. Circle and Arc intersections
+      if (o.type === 'circle' || o.type === 'arc') {
+        if (inBox(o.c)) return true;
+        for (let edge of boxEdges) {
+          const ips = getLineCircleIntersections(edge[0], edge[1], o.c, o.r);
+          if (ips.length > 0) {
+            if (o.type === 'circle') return true;
+            const hasArcIp = ips.some(ip => {
+              const ang = Math.atan2(ip.y - o.c[1], ip.x - o.c[0]);
+              return isAngleBetween(ang, o.a0, o.a1, o.ccw);
+            });
+            if (hasArcIp) return true;
+          }
+        }
+      }
+
+      // 4. Ellipse intersections
+      if (o.type === 'ellipse') {
+        if (inBox(o.c)) return true;
+        const minX = o.c[0] - o.rx, maxX = o.c[0] + o.rx;
+        const minY = o.c[1] - o.ry, maxY = o.c[1] + o.ry;
+        return !(maxX < bx1 || minX > bx2 || maxY < by1 || minY > by2);
+      }
+
+      return false;
+    }
+
+    function objectEntirelyInBox(o, bx1, by1, bx2, by2) {
+      const inBox = (p) => p && p[0] >= bx1 && p[0] <= bx2 && p[1] >= by1 && p[1] <= by2;
+
+      if (o.type === 'line' || o.type === 'dim') {
+        return inBox(o.p1) && inBox(o.p2);
+      }
+      if (o.type === 'rect' || o.type === 'hatch') {
+        return inBox(o.p1) && inBox(o.p2) &&
+               inBox([o.p1[0], o.p2[1]]) && inBox([o.p2[0], o.p1[1]]);
+      }
+      if (o.type === 'polyline' || o.type === 'freehand') {
+        return o.pts.every(inBox);
+      }
+      if (o.type === 'circle' || o.type === 'arc') {
+        return o.c[0] - o.r >= bx1 && o.c[0] + o.r <= bx2 &&
+               o.c[1] - o.r >= by1 && o.c[1] + o.r <= by2;
+      }
+      if (o.type === 'ellipse') {
+        return o.c[0] - o.rx >= bx1 && o.c[0] + o.rx <= bx2 &&
+               o.c[1] - o.ry >= by1 && o.c[1] + o.ry <= by2;
+      }
+      if (o.type === 'text') {
+        return inBox(o.p);
+      }
+      return false;
+    }
+
+    function drawGrid(r) {
+      const g = grid * view.scale;
+      if (g < 4) return;
+      ctx.lineWidth = 1;
+      let startX = view.ox % g; if (startX < 0) startX += g;
+      let startY = view.oy % g; if (startY < 0) startY += g;
+      const majorEvery = 5;
+      let i = 0;
+      for (let x = startX; x < r.width; x += g, i++) {
+        ctx.strokeStyle = (Math.round((x - view.ox) / g) % majorEvery === 0) ? '#2c3b33' : '#1a2420';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, r.height); ctx.stroke();
+      }
+      i = 0;
+      for (let y = startY; y < r.height; y += g, i++) {
+        ctx.strokeStyle = (Math.round((y - view.oy) / g) % majorEvery === 0) ? '#2c3b33' : '#1a2420';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(r.width, y); ctx.stroke();
+      }
+      // origin axes
+      const [ox0, oy0] = worldToScreen(0, 0);
+      ctx.strokeStyle = 'rgba(95,251,176,0.25)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(0, oy0); ctx.lineTo(r.width, oy0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ox0, 0); ctx.lineTo(ox0, r.height); ctx.stroke();
+    }
+
+    function drawCrosshair() {
+      const r = wrap.getBoundingClientRect();
+      const isHoverActive = hoveredObj && (currentTool === 'move' || currentTool === 'dim');
+      ctx.strokeStyle = isHoverActive ? 'rgba(255, 180, 62, 0.8)' : 'rgba(95,251,176,0.55)';
+      ctx.lineWidth = 1;
+      const cx = mouse.x;
+      const cy = mouse.y;
+      const s = 6; // size of the center diamond
+      
+      // Vertical line (broken by the diamond)
+      ctx.beginPath();
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, cy - s);
+      ctx.moveTo(cx, cy + s);
+      ctx.lineTo(cx, r.height);
+      ctx.stroke();
+      
+      // Horizontal line (broken by the diamond)
+      ctx.beginPath();
+      ctx.moveTo(0, cy);
+      ctx.lineTo(cx - s, cy);
+      ctx.moveTo(cx + s, cy);
+      ctx.lineTo(r.width, cy);
+      ctx.stroke();
+      
+      // Center diamond
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s);
+      ctx.lineTo(cx + s, cy);
+      ctx.lineTo(cx, cy + s);
+      ctx.lineTo(cx - s, cy);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+
+    function styleFor(obj, customColor) {
+      const col = customColor || obj.color || currentColor;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = obj.width || currentWidth;
+      ctx.fillStyle = col;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      
+      const type = obj.lineType || (obj === drawing ? currentLineType : 'solid');
+      if (type === 'dashed') {
+        ctx.setLineDash([8, 6]);
+      } else if (type === 'shortdashed') {
+        ctx.setLineDash([4, 4]);
+      } else if (type === 'longdashed') {
+        ctx.setLineDash([16, 6]);
+      } else if (type === 'dotted') {
+        ctx.setLineDash([2, 4]);
+      } else if (type === 'dotteddense') {
+        ctx.setLineDash([2, 2]);
+      } else if (type === 'dashdot') {
+        ctx.setLineDash([10, 4, 2, 4]);
+      } else if (type === 'center') {
+        ctx.setLineDash([12, 3, 3, 3]);
+      } else if (type === 'phantom') {
+        ctx.setLineDash([12, 3, 3, 3, 3, 3]);
+      } else {
+        ctx.setLineDash([]);
+      }
+    }
+    function drawObject(obj, isSelected, isPreview, isHovered) {
+      ctx.save();
+      
+      const isAngleDimFirst = obj === dimAngleFirstLine;
+      const isMoveOrDimHover = isHovered && (currentTool === 'move' || currentTool === 'dim');
+      const isDeleteHover = isHovered && currentTool === 'delete';
+      const isSelectHover = isHovered && currentTool === 'select';
+
+      let drawColor = obj.color || currentColor;
+      if (isAngleDimFirst) {
+        drawColor = '#ffb43e';
+      } else if (isMoveOrDimHover) {
+        drawColor = '#ffb43e';
+      } else if (isDeleteHover) {
+        drawColor = '#ff5d5d';
+      } else if (isSelectHover) {
+        drawColor = '#5ffbb0';
+      }
+
+      styleFor(obj, drawColor);
+
+      if (isAngleDimFirst) {
+        ctx.lineWidth = (obj.width || currentWidth) * 1.5;
+        ctx.shadowColor = '#ffb43e';
+        ctx.shadowBlur = 10;
+      } else if (isMoveOrDimHover) {
+        ctx.lineWidth = (obj.width || currentWidth) * 1.3;
+        ctx.shadowColor = '#ffb43e';
+        ctx.shadowBlur = 10;
+      } else if (isDeleteHover) {
+        ctx.lineWidth = (obj.width || currentWidth) * 1.3;
+        ctx.shadowColor = '#ff5d5d';
+        ctx.shadowBlur = 10;
+      } else if (isSelectHover) {
+        ctx.lineWidth = (obj.width || currentWidth) * 1.3;
+        ctx.shadowColor = '#5ffbb0';
+        ctx.shadowBlur = 8;
+      } else if (isSelected) {
+        ctx.shadowColor = '#5ffbb0';
+        ctx.shadowBlur = 8;
+      }
+
+      if (isPreview) {
+        ctx.globalAlpha = 0.85;
+        const type = obj.lineType || currentLineType;
+        if (type === 'solid') {
+          ctx.setLineDash([6, 4]);
+        }
+      }
+
+      if (obj.type === 'line') {
+        const [x1, y1] = worldToScreen(...obj.p1), [x2, y2] = worldToScreen(...obj.p2);
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      } else if (obj.type === 'polyline') {
+        if (obj.pts.length < 1) { ctx.restore(); return; }
+        ctx.beginPath();
+        const [x0, y0] = worldToScreen(...obj.pts[0]); ctx.moveTo(x0, y0);
+        obj.pts.slice(1).forEach(p => { const [x, y] = worldToScreen(...p); ctx.lineTo(x, y); });
+        ctx.stroke();
+        obj.pts.forEach(p => { const [x, y] = worldToScreen(...p); ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill(); });
+      } else if (obj.type === 'freehand' || obj.type === 'rect-3corner') {
+        if (obj.pts.length < 2) { ctx.restore(); return; }
+        ctx.beginPath();
+        const [x0, y0] = worldToScreen(...obj.pts[0]); ctx.moveTo(x0, y0);
+        obj.pts.slice(1).forEach(p => { const [x, y] = worldToScreen(...p); ctx.lineTo(x, y); });
+        ctx.stroke();
+      } else if (obj.type === 'arc-3point') {
+        if (obj.pts.length < 2) { ctx.restore(); return; }
+        if (obj.pts.length === 2) {
+          const [x1, y1] = worldToScreen(...obj.pts[0]);
+          const [x2, y2] = worldToScreen(...obj.pts[1]);
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        } else {
+          const arc = get3PointArc(obj.pts[0], obj.pts[1], obj.pts[2]);
+          if (arc) {
+            const [cx, cy] = worldToScreen(...arc.c);
+            ctx.beginPath();
+            ctx.arc(cx, cy, arc.r * view.scale, arc.a0, arc.a1, !!arc.ccw);
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            const [x0, y0] = worldToScreen(...obj.pts[0]); ctx.moveTo(x0, y0);
+            obj.pts.slice(1).forEach(p => { const [x, y] = worldToScreen(...p); ctx.lineTo(x, y); });
+            ctx.stroke();
+          }
+        }
+      } else if (obj.type === 'arc-sce' || obj.type === 'arc-cse') {
+        if (obj.c) {
+          const [cx, cy] = worldToScreen(...obj.c);
+          ctx.beginPath();
+          ctx.arc(cx, cy, obj.r * view.scale, obj.a0, obj.a1, !!obj.ccw);
+          ctx.stroke();
+        } else if (obj.pts) {
+          ctx.beginPath();
+          const [x0, y0] = worldToScreen(...obj.pts[0]); ctx.moveTo(x0, y0);
+          obj.pts.slice(1).forEach(p => { const [x, y] = worldToScreen(...p); ctx.lineTo(x, y); });
+          ctx.stroke();
+        }
+      } else if (obj.type === 'circle-tantan' || obj.type === 'circle-tantantan') {
+        if (obj.c) {
+          const [cx, cy] = worldToScreen(...obj.c);
+          ctx.beginPath();
+          ctx.arc(cx, cy, obj.r * view.scale, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (obj.type === 'rect') {
+        const [x1, y1] = worldToScreen(...obj.p1), [x2, y2] = worldToScreen(...obj.p2);
+        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+      } else if (obj.type === 'circle') {
+        const [cx, cy] = worldToScreen(...obj.c);
+        const rad = obj.r * view.scale;
+        ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
+      } else if (obj.type === 'ellipse') {
+        const [cx, cy] = worldToScreen(...obj.c);
+        ctx.beginPath(); ctx.ellipse(cx, cy, obj.rx * view.scale, obj.ry * view.scale, 0, 0, Math.PI * 2); ctx.stroke();
+      } else if (obj.type === 'arc') {
+        const [cx, cy] = worldToScreen(...obj.c);
+        ctx.beginPath(); ctx.arc(cx, cy, obj.r * view.scale, obj.a0, obj.a1, !!obj.ccw); ctx.stroke();
+      } else if (obj.type === 'text') {
+        const [x, y] = worldToScreen(...obj.p);
+        ctx.font = `${14 * Math.max(view.scale, 0.6)}px IBM Plex Mono, monospace`;
+        ctx.fillText(obj.text, x, y);
+      } else if (obj.type === 'dim') {
+        if (obj.dimType === 'angle') {
+          if (obj.targetId1 && obj.targetId2 && objects.includes(obj.targetId1) && objects.includes(obj.targetId2)) {
+            const line1 = obj.targetId1;
+            const line2 = obj.targetId2;
+            const connection = findConnection(line1, line2);
+            if (connection) {
+              obj.c = connection.vertex;
+              const A = connection.p1;
+              const B = connection.p2;
+              const ang1 = Math.atan2(A[1] - obj.c[1], A[0] - obj.c[0]);
+              const ang2 = Math.atan2(B[1] - obj.c[1], B[0] - obj.c[0]);
+              let diff = ang2 - ang1;
+              while (diff < 0) diff += 2 * Math.PI;
+              if (diff <= Math.PI) {
+                obj.a0 = ang1;
+                obj.a1 = ang2;
+              } else {
+                obj.a0 = ang2;
+                obj.a1 = ang1;
+              }
+            }
+          }
+
+          const [cx, cy] = worldToScreen(...obj.c);
+          const rad = (obj.r || 25) * view.scale;
+
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, obj.a0, obj.a1, !!obj.ccw);
+          ctx.stroke();
+
+          ctx.save();
+          ctx.setLineDash([]);
+          [obj.a0, obj.a1].forEach(a => {
+            const cos = Math.cos(a);
+            const sin = Math.sin(a);
+            ctx.beginPath();
+            ctx.moveTo(cx + (rad - 5) * cos, cy + (rad - 5) * sin);
+            ctx.lineTo(cx + (rad + 5) * cos, cy + (rad + 5) * sin);
+            ctx.stroke();
+          });
+          ctx.restore();
+
+          let angleRad = obj.a1 - obj.a0;
+          if (angleRad < 0) angleRad += 2 * Math.PI;
+          if (angleRad > Math.PI) angleRad = 2 * Math.PI - angleRad;
+          const angleDeg = angleRad * 180 / Math.PI;
+          const label = angleDeg.toFixed(1) + '°';
+
+          const midAngle = obj.a0 + angleRad / 2;
+          const textX = cx + (rad + 8) * Math.cos(midAngle);
+          const textY = cy + (rad + 8) * Math.sin(midAngle);
+
+          ctx.font = '11px IBM Plex Mono, monospace';
+          ctx.fillStyle = drawColor;
+          ctx.fillText(label, textX - 6, textY + 3);
+        } else {
+          if (obj.dimType === 'radius' && obj.targetId && objects.includes(obj.targetId)) {
+            const target = obj.targetId;
+            obj.p1 = [target.c[0], target.c[1]];
+            const angle = Math.atan2(obj.p2[1] - obj.p1[1], obj.p2[0] - obj.p1[0]);
+            obj.p2 = [target.c[0] + target.r * Math.cos(angle), target.c[1] + target.r * Math.sin(angle)];
+          } else if (obj.dimType === 'lineLength' && obj.targetId && objects.includes(obj.targetId)) {
+            const target = obj.targetId;
+            let tp1, tp2;
+            if (target.type === 'rect' || target.type === 'hatch') {
+              const rx1 = Math.min(target.p1[0], target.p2[0]), rx2 = Math.max(target.p1[0], target.p2[0]);
+              const ry1 = Math.min(target.p1[1], target.p2[1]), ry2 = Math.max(target.p1[1], target.p2[1]);
+              const sides = [
+                [[rx1, ry1], [rx2, ry1]], // Top (0)
+                [[rx2, ry1], [rx2, ry2]], // Right (1)
+                [[rx1, ry2], [rx2, ry2]], // Bottom (2)
+                [[rx1, ry1], [rx1, ry2]]  // Left (3)
+              ];
+              const sideIdx = obj.rectSide !== undefined ? obj.rectSide : 0;
+              tp1 = sides[sideIdx][0];
+              tp2 = sides[sideIdx][1];
+            } else {
+              tp1 = target.p1;
+              tp2 = target.p2;
+            }
+            const dx = tp2[0] - tp1[0];
+            const dy = tp2[1] - tp1[1];
+            const len = Math.hypot(dx, dy);
+            if (len > 1e-4) {
+              const nx = -dy / len;
+              const ny = dx / len;
+              const ox = obj.p1[0] - tp1[0];
+              const oy = obj.p1[1] - tp1[1];
+              const offset = ox * nx + oy * ny;
+              obj.p1 = [tp1[0] + nx * offset, tp1[1] + ny * offset];
+              obj.p2 = [tp2[0] + nx * offset, tp2[1] + ny * offset];
+            }
+          }
+
+          const [x1, y1] = worldToScreen(...obj.p1), [x2, y2] = worldToScreen(...obj.p2);
+          
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+          
+          const ang = Math.atan2(y2 - y1, x2 - x1);
+          
+          ctx.save();
+          ctx.setLineDash([]);
+          [[x1, y1], [x2, y2]].forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.moveTo(x - 5 * Math.cos(ang + Math.PI / 2), y - 5 * Math.sin(ang + Math.PI / 2));
+            ctx.lineTo(x + 5 * Math.cos(ang + Math.PI / 2), y + 5 * Math.sin(ang + Math.PI / 2));
+            ctx.stroke();
+          });
+          ctx.restore();
+
+          if (obj.dimType === 'lineLength' && obj.targetId && objects.includes(obj.targetId)) {
+            const target = obj.targetId;
+            ctx.save();
+            ctx.strokeStyle = drawColor;
+            ctx.lineWidth = Math.max(0.5, (obj.width || currentWidth) * 0.6);
+            ctx.globalAlpha = 0.5;
+            ctx.setLineDash([4, 4]); // thin dashed extension lines
+            let tp1, tp2;
+            if (target.type === 'rect' || target.type === 'hatch') {
+              const rx1 = Math.min(target.p1[0], target.p2[0]), rx2 = Math.max(target.p1[0], target.p2[0]);
+              const ry1 = Math.min(target.p1[1], target.p2[1]), ry2 = Math.max(target.p1[1], target.p2[1]);
+              const sides = [
+                [[rx1, ry1], [rx2, ry1]], // Top (0)
+                [[rx2, ry1], [rx2, ry2]], // Right (1)
+                [[rx1, ry2], [rx2, ry2]], // Bottom (2)
+                [[rx1, ry1], [rx1, ry2]]  // Left (3)
+              ];
+              const sideIdx = obj.rectSide !== undefined ? obj.rectSide : 0;
+              tp1 = sides[sideIdx][0];
+              tp2 = sides[sideIdx][1];
+            } else {
+              tp1 = target.p1;
+              tp2 = target.p2;
+            }
+            const [tx1, ty1] = worldToScreen(...tp1);
+            const [tx2, ty2] = worldToScreen(...tp2);
+            ctx.beginPath();
+            ctx.moveTo(tx1, ty1);
+            ctx.lineTo(x1, y1);
+            ctx.moveTo(tx2, ty2);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          const dist = Math.hypot(obj.p2[0] - obj.p1[0], obj.p2[1] - obj.p1[1]);
+          const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+          ctx.font = '11px IBM Plex Mono, monospace';
+          ctx.fillStyle = drawColor;
+          let label = dist.toFixed(1) + ' mm';
+          if (obj.dimType === 'radius') {
+            label = 'R ' + label;
+          }
+          ctx.fillText(label, mx + 6, my - 6);
+        }
+      } else if (obj.type === 'hatch') {
+        const [x1, y1] = worldToScreen(...obj.p1), [x2, y2] = worldToScreen(...obj.p2);
+        const rx = Math.min(x1, x2), ry = Math.min(y1, y2), rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
+        ctx.strokeStyle = drawColor; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+        const step = 8;
+        for (let d = -rh; d < rw; d += step) {
+          ctx.beginPath(); ctx.moveTo(rx + d, ry + rh); ctx.lineTo(rx + d + rh, ry); ctx.stroke();
+        }
+        ctx.restore();
+        ctx.strokeRect(rx, ry, rw, rh);
+      }
+      ctx.restore();
+    }
+
+    /* ---------------- INTERACTION ---------------- */
+    /* ---------------- INTERACTION ---------------- */
+    let activeSubtool = 'rect-2corner';
+
+    function setSubtool(sub) {
+      activeSubtool = sub;
+      const mainTool = sub.split('-')[0];
+
+      // Update dropdown option active states
+      document.querySelectorAll('.dropdown-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.subtool === sub);
+      });
+
+      // Update the button's label to reflect the selected subtool name
+      const optEl = document.querySelector(`.dropdown-option[data-subtool="${sub}"]`);
+      if (optEl) {
+        const parentContainer = optEl.closest('.tool-dropdown-container');
+        if (parentContainer) {
+          const btnLabel = parentContainer.querySelector('.btn-label');
+          if (btnLabel) {
+            const displayName = getSubtoolDisplayName(sub);
+            btnLabel.innerHTML = displayName + ' <span class="arrow-indicator">▼</span>';
+          }
+        }
+      }
+
+      setTool(mainTool);
+    }
+
+    function getSubtoolDisplayName(sub) {
+      switch(sub) {
+        case 'rect-2corner': return '2 Corner';
+        case 'rect-center': return 'Center';
+        case 'rect-3corner': return '3 Corner';
+        case 'arc-3point': return '3-Pt Arc';
+        case 'arc-sce': return 'S-C-E Arc';
+        case 'arc-cse': return 'C-S-E Arc';
+        case 'circle-center': return 'Circle';
+        case 'circle-tantan': return 'Tan-Tan';
+        case 'circle-tantantan': return '3-Tan';
+        default: return sub;
+      }
+    }
+
+    function setTool(t) {
+      currentTool = t;
+      document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+      
+      let displayTool = t.toUpperCase();
+      if ((t === 'rect' || t === 'circle' || t === 'arc') && activeSubtool.startsWith(t + '-')) {
+        displayTool = activeSubtool.replace('-', ': ').toUpperCase();
+      }
+      document.getElementById('status-tool').textContent = 'TOOL: ' + displayTool;
+      
+      drawing = null; polyPoints = []; activeParallelRelation = null; activeTangentMarker = null;
+      canvas.style.cursor = (t === 'pan') ? 'grab' : (t === 'select' ? 'default' : 'crosshair');
+      updateCtxBar();
+      render();
+    }
+
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.tool;
+        if (t === 'undo') { doUndo(); return; }
+        if (t === 'clear') { if (confirm('Clear entire sheet? This cannot be undone.')) { objects = []; undoStack = []; updateStatus(); render(); } return; }
+        if (t === 'delete') { setTool('delete'); return; }
+        
+        if (t === 'rect') {
+          if (!activeSubtool.startsWith('rect-')) activeSubtool = 'rect-2corner';
+          setSubtool(activeSubtool);
+          return;
+        }
+        if (t === 'circle') {
+          if (!activeSubtool.startsWith('circle-')) activeSubtool = 'circle-center';
+          setSubtool(activeSubtool);
+          return;
+        }
+        if (t === 'arc') {
+          if (!activeSubtool.startsWith('arc-')) activeSubtool = 'arc-3point';
+          setSubtool(activeSubtool);
+          return;
+        }
+        
+        setTool(t);
+      });
+    });
+
+    document.querySelectorAll('.dropdown-option').forEach(opt => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sub = opt.dataset.subtool;
+        setSubtool(sub);
+      });
+    });
+
+    function pushUndo() { undoStack.push(JSON.stringify(objects)); if (undoStack.length > 60) undoStack.shift(); }
+    function doUndo() { if (undoStack.length) { objects = JSON.parse(undoStack.pop()); setupObjectsIntercept(); selected = null; updateStatus(); render(); } }
+
+    function getMouseWorld(e) {
+      const r = canvas.getBoundingClientRect();
+      const sx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+      const sy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+      mouse.x = sx; mouse.y = sy;
+      let [wx, wy] = screenToWorld(sx, sy);
+      mouse.wx = wx; mouse.wy = wy;
+      return [wx, wy];
+    }
+
+    let dragStarted = false;
+    let dragStartWorld = null;
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 2) return; // ignore right click
+      const [wx, wy] = getMouseWorld(e);
+      const [sx, sy] = snapPoint(wx, wy);
+
+      if (currentTool === 'pan' || e.button === 1) {
+        isPanning = true; panStart = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy };
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
+      if (currentTool === 'select') {
+        const hit = hitTest(wx, wy);
+        if (hit) {
+          if (e.ctrlKey || e.metaKey) {
+            if (selected === null) {
+              selected = [hit];
+            } else if (Array.isArray(selected)) {
+              if (selected.includes(hit)) {
+                selected = selected.filter(o => o !== hit);
+                if (selected.length === 0) selected = null;
+              } else {
+                selected.push(hit);
+              }
+            } else {
+              if (selected === hit) {
+                selected = null;
+              } else {
+                selected = [selected, hit];
+              }
+            }
+          } else {
+            selected = hit;
+          }
+        } else {
+          if (!(e.ctrlKey || e.metaKey)) {
+            selected = null;
+          }
+          selectionBox = { p1: [wx, wy], p2: [wx, wy] };
+        }
+        updateCtxBar();
+        render();
+        return;
+      }
+      if (currentTool === 'delete') {
+        const hit = hitTest(wx, wy);
+        if (hit) { pushUndo(); objects = objects.filter(o => o !== hit); updateStatus(); render(); }
+        return;
+      }
+      if (currentTool === 'trim') {
+        drawing = { type: 'line', p1: [wx, wy], p2: [wx, wy], color: '#ff5d5d', width: currentWidth, isTrimFence: true };
+        return;
+      }
+
+      dragStarted = true;
+      dragStartWorld = [sx, sy];
+
+      if (currentTool === 'line') {
+        drawing = { type: 'line', p1: [sx, sy], p2: [sx, sy], color: currentColor, width: currentWidth };
+      } else if (currentTool === 'freehand') {
+        dragStarted = true;
+        polyPoints = [[wx, wy]];
+        drawing = { type: 'freehand', pts: [...polyPoints], color: currentColor, width: currentWidth };
+      } else if (currentTool === 'rect') {
+        if (activeSubtool === 'rect-2corner') {
+          drawing = { type: 'rect', p1: [sx, sy], p2: [sx, sy], color: currentColor, width: currentWidth };
+        } else if (activeSubtool === 'rect-center') {
+          drawing = { type: 'rect', mode: 'center', c: [sx, sy], p1: [sx, sy], p2: [sx, sy], color: currentColor, width: currentWidth };
+        } else if (activeSubtool === 'rect-3corner') {
+          dragStarted = false;
+          polyPoints.push([sx, sy]);
+          if (polyPoints.length === 1) {
+            drawing = { type: 'rect-3corner', pts: [[sx, sy], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 2) {
+            drawing = { type: 'rect-3corner', pts: [polyPoints[0], polyPoints[1], [sx, sy], polyPoints[0]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 3) {
+            const finalPts = get3CornerRectPoints(polyPoints[0], polyPoints[1], [sx, sy]);
+            pushUndo();
+            objects.push({ type: 'polyline', pts: finalPts, color: currentColor, width: currentWidth });
+            polyPoints = []; drawing = null; updateStatus(); render();
+          }
+        }
+      } else if (currentTool === 'circle') {
+        if (activeSubtool === 'circle-center') {
+          drawing = { type: 'circle', c: [sx, sy], r: 0.01, color: currentColor, width: currentWidth };
+        } else if (activeSubtool === 'circle-tantan' || activeSubtool === 'circle-tantantan') {
+          dragStarted = false;
+          if (activeSubtool === 'circle-tantan' && polyPoints.length === 2) {
+            const res = getTanTanCircle(polyPoints[0], polyPoints[1], [wx, wy]);
+            if (res) {
+              pushUndo();
+              objects.push({ type: 'circle', c: res.c, r: res.r, color: currentColor, width: currentWidth });
+            }
+            polyPoints = []; drawing = null; updateStatus(); render();
+          } else {
+            const seg = findNearestSegment(wx, wy);
+            if (seg && !polyPoints.some(p => isSameSeg(p, seg))) {
+              polyPoints.push(seg);
+              if (activeSubtool === 'circle-tantantan' && polyPoints.length === 3) {
+                const res = getTanTanTanCircle(polyPoints[0], polyPoints[1], polyPoints[2]);
+                if (res) {
+                  pushUndo();
+                  objects.push({ type: 'circle', c: res.c, r: res.r, color: currentColor, width: currentWidth });
+                }
+                polyPoints = []; drawing = null; updateStatus(); render();
+              } else {
+                drawing = { type: activeSubtool, color: currentColor, width: currentWidth };
+              }
+            }
+          }
+        }
+      } else if (currentTool === 'arc') {
+        dragStarted = false;
+        if (activeSubtool === 'arc-3point') {
+          polyPoints.push([sx, sy]);
+          if (polyPoints.length === 1) {
+            drawing = { type: 'arc-3point', pts: [[sx, sy], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 2) {
+            drawing = { type: 'arc-3point', pts: [polyPoints[0], polyPoints[1], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 3) {
+            const arc = get3PointArc(polyPoints[0], polyPoints[1], [sx, sy]);
+            if (arc) {
+              pushUndo();
+              objects.push({ type: 'arc', c: arc.c, r: arc.r, a0: arc.a0, a1: arc.a1, ccw: arc.ccw, color: currentColor, width: currentWidth });
+            }
+            polyPoints = []; drawing = null; updateStatus(); render();
+          }
+        } else if (activeSubtool === 'arc-sce') {
+          polyPoints.push([sx, sy]);
+          if (polyPoints.length === 1) {
+            drawing = { type: 'arc-sce', pts: [[sx, sy], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 2) {
+            drawing = { type: 'arc-sce', pts: [polyPoints[0], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 3) {
+            const c = polyPoints[1];
+            const r = Math.hypot(polyPoints[0][0] - c[0], polyPoints[0][1] - c[1]);
+            const a0 = Math.atan2(polyPoints[0][1] - c[1], polyPoints[0][0] - c[0]);
+            const a1 = Math.atan2(sy - c[1], sx - c[0]);
+            pushUndo();
+            objects.push({ type: 'arc', c: c, r: r, a0: a0, a1: a1, ccw: false, color: currentColor, width: currentWidth });
+            polyPoints = []; drawing = null; updateStatus(); render();
+          }
+        } else if (activeSubtool === 'arc-cse') {
+          polyPoints.push([sx, sy]);
+          if (polyPoints.length === 1) {
+            drawing = { type: 'arc-cse', pts: [[sx, sy], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 2) {
+            drawing = { type: 'arc-cse', pts: [polyPoints[0], [sx, sy]], color: currentColor, width: currentWidth };
+          } else if (polyPoints.length === 3) {
+            const c = polyPoints[0];
+            const r = Math.hypot(polyPoints[1][0] - c[0], polyPoints[1][1] - c[1]);
+            const a0 = Math.atan2(polyPoints[1][1] - c[1], polyPoints[1][0] - c[0]);
+            const a1 = Math.atan2(sy - c[1], sx - c[0]);
+            pushUndo();
+            objects.push({ type: 'arc', c: c, r: r, a0: a0, a1: a1, ccw: false, color: currentColor, width: currentWidth });
+            polyPoints = []; drawing = null; updateStatus(); render();
+          }
+        }
+      } else if (currentTool === 'ellipse') {
+        drawing = { type: 'ellipse', c: [sx, sy], rx: 0.01, ry: 0.01, color: currentColor, width: currentWidth };
+      } else if (currentTool === 'dim') {
+        const hit = hitTest(wx, wy);
+        if (e.ctrlKey || e.metaKey) {
+          if (hit && hit.type === 'line') {
+            if (!dimAngleFirstLine) {
+              dimAngleFirstLine = hit;
+              showFloatingStatus('First line selected. Click second connected line.', 'info');
+              render();
+            } else {
+              if (hit === dimAngleFirstLine) {
+                dimAngleFirstLine = null;
+                showFloatingStatus('First line deselected.', 'info');
+                render();
+              } else {
+                const connection = findConnection(dimAngleFirstLine, hit);
+                if (connection) {
+                  pushUndo();
+                  const c = connection.vertex;
+                  const A = connection.p1;
+                  const B = connection.p2;
+                  const ang1 = Math.atan2(A[1] - c[1], A[0] - c[0]);
+                  const ang2 = Math.atan2(B[1] - c[1], B[0] - c[0]);
+                  let a0, a1;
+                  let diff = ang2 - ang1;
+                  while (diff < 0) diff += 2 * Math.PI;
+                  if (diff <= Math.PI) {
+                    a0 = ang1;
+                    a1 = ang2;
+                  } else {
+                    a0 = ang2;
+                    a1 = ang1;
+                  }
+                  objects.push({
+                    type: 'dim',
+                    dimType: 'angle',
+                    targetId1: dimAngleFirstLine,
+                    targetId2: hit,
+                    c: c,
+                    r: 25,
+                    a0: a0,
+                    a1: a1,
+                    ccw: false,
+                    color: currentColor,
+                    width: currentWidth
+                  });
+                  dimAngleFirstLine = null;
+                  setTool('select');
+                  showFloatingStatus('Angle dimension added.', 'success');
+                  updateStatus();
+                  render();
+                } else {
+                  showFloatingStatus('Lines must be connected.', 'error');
+                }
+              }
+            }
+          }
+          return;
+        }
+        if (hit && (hit.type === 'circle' || hit.type === 'arc')) {
+          pushUndo();
+          const angle = Math.atan2(wy - hit.c[1], wx - hit.c[0]);
+          const bp = [hit.c[0] + hit.r * Math.cos(angle), hit.c[1] + hit.r * Math.sin(angle)];
+          objects.push({
+            type: 'dim',
+            p1: [hit.c[0], hit.c[1]],
+            p2: bp,
+            targetId: hit,
+            dimType: 'radius',
+            color: currentColor,
+            width: currentWidth
+          });
+          setTool('select');
+          updateStatus();
+          render();
+          return;
+        } else if (hit && hit.type === 'line') {
+          pushUndo();
+          const dx = hit.p2[0] - hit.p1[0];
+          const dy = hit.p2[1] - hit.p1[1];
+          const len = Math.hypot(dx, dy);
+          if (len > 1e-4) {
+            const nx = -dy / len;
+            const ny = dx / len;
+            const offset = 25; // 25mm default offset
+            objects.push({
+              type: 'dim',
+              p1: [hit.p1[0] + nx * offset, hit.p1[1] + ny * offset],
+              p2: [hit.p2[0] + nx * offset, hit.p2[1] + ny * offset],
+              targetId: hit,
+              dimType: 'lineLength',
+              color: currentColor,
+              width: currentWidth
+            });
+            setTool('select');
+            updateStatus();
+            render();
+            return;
+          }
+        } else if (hit && (hit.type === 'rect' || hit.type === 'hatch')) {
+          pushUndo();
+          const rx1 = Math.min(hit.p1[0], hit.p2[0]), rx2 = Math.max(hit.p1[0], hit.p2[0]);
+          const ry1 = Math.min(hit.p1[1], hit.p2[1]), ry2 = Math.max(hit.p1[1], hit.p2[1]);
+          const sides = [
+            [[rx1, ry1], [rx2, ry1]], // Top (0)
+            [[rx2, ry1], [rx2, ry2]], // Right (1)
+            [[rx1, ry2], [rx2, ry2]], // Bottom (2)
+            [[rx1, ry1], [rx1, ry2]]  // Left (3)
+          ];
+          let bestSideIdx = 0;
+          let bestDist = Infinity;
+          sides.forEach((side, idx) => {
+            const dist = distToSeg([wx, wy], side[0], side[1]);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestSideIdx = idx;
+            }
+          });
+
+          const tp1 = sides[bestSideIdx][0];
+          const tp2 = sides[bestSideIdx][1];
+          const dx = tp2[0] - tp1[0];
+          const dy = tp2[1] - tp1[1];
+          const len = Math.hypot(dx, dy);
+          if (len > 1e-4) {
+            const nx = -dy / len;
+            const ny = dx / len;
+            const offset = 25;
+            objects.push({
+              type: 'dim',
+              p1: [tp1[0] + nx * offset, tp1[1] + ny * offset],
+              p2: [tp2[0] + nx * offset, tp2[1] + ny * offset],
+              targetId: hit,
+              dimType: 'lineLength',
+              rectSide: bestSideIdx,
+              color: currentColor,
+              width: currentWidth
+            });
+            setTool('select');
+            updateStatus();
+            render();
+            return;
+          }
+        }
+        drawing = { type: 'dim', p1: [sx, sy], p2: [sx, sy], color: currentColor, width: currentWidth };
+      } else if (currentTool === 'hatch') {
+        drawing = { type: 'hatch', p1: [sx, sy], p2: [sx, sy], color: currentColor, width: currentWidth };
+      } else if (currentTool === 'polyline') {
+        polyPoints.push([sx, sy]);
+        drawing = { type: 'polyline', pts: [...polyPoints], color: currentColor, width: currentWidth };
+      } else if (currentTool === 'text') {
+        const txt = prompt('Enter text:');
+        if (txt) { pushUndo(); objects.push({ type: 'text', p: [sx, sy], text: txt, color: currentColor }); updateStatus(); render(); }
+      } else if (currentTool === 'move') {
+        const hit = hitTest(wx, wy);
+        if (hit) {
+          selected = hit;
+          updateCtxBar();
+          drawing = { moving: true, start: [wx, wy] };
+        } else if (selected) {
+          drawing = { moving: true, start: [wx, wy] };
+        }
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      const [wx, wy] = getMouseWorld(e);
+      document.getElementById('coord-readout').textContent = `X ${wx.toFixed(2)}  Y ${wy.toFixed(2)}`;
+
+      if (isPanning && panStart) {
+        view.ox = panStart.ox + (e.clientX - panStart.x);
+        view.oy = panStart.oy + (e.clientY - panStart.y);
+        render();
+        return;
+      }
+
+      if (selectionBox) {
+        selectionBox.p2 = [wx, wy];
+        render();
+        return;
+      }
+
+      if (drawing) {
+        let [sx, sy] = snapPoint(wx, wy);
+        let parallelInfo = null;
+
+        if (drawing.isTrimFence) {
+          drawing.p2 = [wx, wy];
+        } else if (drawing.type === 'line' || drawing.type === 'dim' || drawing.type === 'polyline') {
+          const pStart = (drawing.type === 'polyline') ? polyPoints[polyPoints.length - 1] : drawing.p1;
+          if (pStart && !activeSnapMarker) {
+            parallelInfo = getParallelSnap(pStart, wx, wy);
+            if (parallelInfo) {
+              sx = parallelInfo.pt[0];
+              sy = parallelInfo.pt[1];
+            }
+          }
+        }
+        activeParallelRelation = parallelInfo;
+
+        if (drawing.type === 'line' || drawing.type === 'dim') {
+          if (parallelInfo) {
+            drawing.p2 = [sx, sy];
+          } else {
+            drawing.p2 = applyOrtho(drawing.p1, [sx, sy]);
+          }
+        } else if (drawing.type === 'rect') {
+          if (drawing.mode === 'center') {
+            const c = drawing.c;
+            const dx = sx - c[0], dy = sy - c[1];
+            drawing.p1 = [c[0] - dx, c[1] - dy];
+            drawing.p2 = [c[0] + dx, c[1] + dy];
+          } else {
+            drawing.p2 = [sx, sy];
+          }
+        } else if (drawing.type === 'rect-3corner') {
+          if (polyPoints.length === 1) {
+            drawing.pts = [polyPoints[0], [sx, sy]];
+          } else if (polyPoints.length === 2) {
+            drawing.pts = get3CornerRectPoints(polyPoints[0], polyPoints[1], [sx, sy]);
+          }
+        } else if (drawing.type === 'arc-3point') {
+          if (polyPoints.length === 1) {
+            drawing.pts = [polyPoints[0], [sx, sy]];
+          } else if (polyPoints.length === 2) {
+            drawing.pts = [polyPoints[0], polyPoints[1], [sx, sy]];
+          }
+        } else if (drawing.type === 'arc-sce') {
+          if (polyPoints.length === 1) {
+            drawing.pts = [polyPoints[0], [sx, sy]];
+          } else if (polyPoints.length === 2) {
+            const c = polyPoints[1];
+            const r = Math.hypot(polyPoints[0][0] - c[0], polyPoints[0][1] - c[1]);
+            const a0 = Math.atan2(polyPoints[0][1] - c[1], polyPoints[0][0] - c[0]);
+            const a1 = Math.atan2(sy - c[1], sx - c[0]);
+            drawing.c = c; drawing.r = r; drawing.a0 = a0; drawing.a1 = a1; drawing.ccw = false;
+          }
+        } else if (drawing.type === 'arc-cse') {
+          if (polyPoints.length === 1) {
+            drawing.pts = [polyPoints[0], [sx, sy]];
+          } else if (polyPoints.length === 2) {
+            const c = polyPoints[0];
+            const r = Math.hypot(polyPoints[1][0] - c[0], polyPoints[1][1] - c[1]);
+            const a0 = Math.atan2(polyPoints[1][1] - c[1], polyPoints[1][0] - c[0]);
+            const a1 = Math.atan2(sy - c[1], sx - c[0]);
+            drawing.c = c; drawing.r = r; drawing.a0 = a0; drawing.a1 = a1; drawing.ccw = false;
+          }
+        } else if (drawing.type === 'circle-tantan') {
+          if (polyPoints.length === 2) {
+            const res = getTanTanCircle(polyPoints[0], polyPoints[1], [wx, wy]);
+            if (res) {
+              drawing.c = res.c;
+              drawing.r = res.r;
+            } else {
+              drawing.c = null;
+            }
+          }
+        } else if (drawing.type === 'circle-tantantan') {
+          if (polyPoints.length === 2) {
+            const seg3 = findNearestSegment(wx, wy);
+            if (seg3 && !isSameSeg(polyPoints[0], seg3) && !isSameSeg(polyPoints[1], seg3)) {
+              const res = getTanTanTanCircle(polyPoints[0], polyPoints[1], seg3);
+              if (res) {
+                drawing.c = res.c;
+                drawing.r = res.r;
+              } else {
+                drawing.c = null;
+              }
+            } else {
+              drawing.c = null;
+            }
+          }
+        } else if (drawing.type === 'freehand') {
+          const last = drawing.pts[drawing.pts.length - 1];
+          if (Math.hypot(wx - last[0], wy - last[1]) > 1 / view.scale) {
+            drawing.pts.push([wx, wy]);
+          }
+        } else if (drawing.type === 'hatch') {
+          drawing.p2 = [sx, sy];
+        } else if (drawing.type === 'circle') {
+          drawing.r = Math.max(0.01, Math.hypot(sx - drawing.c[0], sy - drawing.c[1]));
+        } else if (drawing.type === 'ellipse') {
+          drawing.rx = Math.max(0.01, Math.abs(sx - drawing.c[0]));
+          drawing.ry = Math.max(0.01, Math.abs(sy - drawing.c[1]));
+        } else if (drawing.type === 'polyline') {
+          drawing.pts = [...polyPoints, [sx, sy]];
+        } else if (drawing.moving && selected) {
+          const dx = wx - drawing.start[0], dy = wy - drawing.start[1];
+          const visited = new Set();
+          if (Array.isArray(selected)) {
+            selected.forEach(o => translateObj(o, dx, dy, visited));
+          } else {
+            translateObj(selected, dx, dy, visited);
+          }
+          drawing.start = [wx, wy];
+        }
+        updateLiveDim(drawing, e);
+        render();
+      } else {
+        if (['select', 'delete', 'move', 'dim'].includes(currentTool)) {
+          hoveredObj = hitTest(wx, wy);
+        } else {
+          hoveredObj = null;
+        }
+
+        if (currentTool !== 'select') {
+          findNearestEndpoint(wx, wy); // updates activeSnapMarker for hover preview
+          activeParallelRelation = null;
+        }
+
+        hideLiveDim();
+        render();
+      }
+    });
+
+    function updateLiveDim(obj, e) {
+      const el = document.getElementById('live-dim');
+      let label = null;
+
+      if (obj.type === 'line' || obj.type === 'dim') {
+        const dx = obj.p2[0] - obj.p1[0], dy = obj.p2[1] - obj.p1[1];
+        const len = Math.hypot(dx, dy);
+        const ang = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360;
+        label = `L ${len.toFixed(1)} mm   ∠ ${ang.toFixed(1)}°`;
+      } else if (obj.type === 'rect' || obj.type === 'hatch') {
+        const w = Math.abs(obj.p2[0] - obj.p1[0]), h = Math.abs(obj.p2[1] - obj.p1[1]);
+        label = `W ${w.toFixed(1)} mm   H ${h.toFixed(1)} mm`;
+      } else if (obj.type === 'circle') {
+        label = `R ${obj.r.toFixed(1)} mm   ⌀ ${(obj.r * 2).toFixed(1)} mm`;
+      } else if (obj.type === 'arc') {
+        label = `R ${obj.r.toFixed(1)} mm   D ${(obj.r * 2).toFixed(1)} mm`;
+      } else if (obj.type === 'ellipse') {
+        label = `RX ${obj.rx.toFixed(1)} mm   RY ${obj.ry.toFixed(1)} mm`;
+      } else if (obj.type === 'polyline' && obj.pts.length > 1) {
+        const a = obj.pts[obj.pts.length - 2], b = obj.pts[obj.pts.length - 1];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        let total = 0;
+        for (let i = 1; i < obj.pts.length; i++) total += Math.hypot(obj.pts[i][0] - obj.pts[i - 1][0], obj.pts[i][1] - obj.pts[i - 1][1]);
+        label = `SEG ${len.toFixed(1)} mm   TOTAL ${total.toFixed(1)} mm`;
+      }
+
+      if (label) {
+        el.textContent = label;
+        el.style.display = 'block';
+        el.style.left = (mouse.x + 16) + 'px';
+        el.style.top = (mouse.y + 16) + 'px';
+      } else {
+        hideLiveDim();
+      }
+    }
+    function hideLiveDim() {
+      document.getElementById('live-dim').style.display = 'none';
+    }
+
+    window.addEventListener('mouseup', (e) => {
+      if (isPanning) { isPanning = false; canvas.style.cursor = currentTool === 'pan' ? 'grab' : 'crosshair'; return; }
+
+      if (selectionBox) {
+        const selectedList = selectObjectsInBox(selectionBox);
+        if (e.ctrlKey || e.metaKey) {
+          let currentList = [];
+          if (selected) {
+            if (Array.isArray(selected)) {
+              currentList = [...selected];
+            } else {
+              currentList = [selected];
+            }
+          }
+          selectedList.forEach(item => {
+            if (!currentList.includes(item)) {
+              currentList.push(item);
+            }
+          });
+          if (currentList.length === 0) {
+            selected = null;
+          } else if (currentList.length === 1) {
+            selected = currentList[0];
+          } else {
+            selected = currentList;
+          }
+        } else {
+          if (selectedList.length === 0) {
+            selected = null;
+          } else if (selectedList.length === 1) {
+            selected = selectedList[0];
+          } else {
+            selected = selectedList;
+          }
+        }
+        selectionBox = null;
+        updateCtxBar();
+        render();
+        return;
+      }
+
+      hideLiveDim();
+      activeParallelRelation = null;
+      activeTangentMarker = null;
+
+      if (drawing && drawing.isTrimFence) {
+        performTrim(drawing.p1, drawing.p2);
+        drawing = null;
+        render();
+      } else if (drawing && !['polyline', 'rect-3corner', 'arc-3point', 'arc-sce', 'arc-cse', 'circle-tantan', 'circle-tantantan'].includes(drawing.type) && !drawing.moving) {
+        if (isDegenerate(drawing)) {
+          drawing = null;
+        } else {
+          pushUndo();
+          objects.push(drawing);
+          drawing = null;
+          updateStatus();
+        }
+        render();
+      } else if (drawing && drawing.moving) {
+        pushUndo();
+        drawing = null;
+      }
+      dragStarted = false;
+    });
+
+    function isDegenerate(obj) {
+      const eps = 1e-6;
+      if (obj.type === 'freehand') return obj.pts.length < 2;
+      if (obj.p1 && obj.p2) {
+        return Math.hypot(obj.p2[0] - obj.p1[0], obj.p2[1] - obj.p1[1]) < eps;
+      }
+      if (obj.type === 'circle' || obj.type === 'arc') return obj.r <= 0.05;
+      if (obj.type === 'ellipse') return obj.rx <= 0.05 && obj.ry <= 0.05;
+      return false;
+    }
+
+    /* touch support: mirror mouse events */
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      canvas.dispatchEvent(new MouseEvent('mousedown', {
+        clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, button: 0
+      }));
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      window.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: e.touches[0].clientX, clientY: e.touches[0].clientY
+      }));
+    }, { passive: false });
+    canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      window.dispatchEvent(new MouseEvent('mouseup', {}));
+    }, { passive: false });
+
+    canvas.addEventListener('dblclick', (e) => {
+      // Cancel any active drawing shape started by the first click of the double-click
+      drawing = null;
+      polyPoints = [];
+
+      if (currentTool === 'polyline' && polyPoints.length > 1) {
+        pushUndo();
+        objects.push({ type: 'polyline', pts: [...polyPoints], color: currentColor, width: currentWidth });
+        polyPoints = []; drawing = null; activeParallelRelation = null; activeTangentMarker = null;
+        updateStatus(); render();
+        return;
+      }
+
+      const [wx, wy] = getMouseWorld(e);
+      const hitDim = hitTestDim(wx, wy);
+      if (hitDim) {
+        const currentVal = getDimensionValue(hitDim);
+        const unit = hitDim.dimType === 'angle' ? '°' : ' mm';
+        const newValStr = prompt(`Change dimension value (currently ${currentVal.toFixed(1)}${unit}):`, currentVal.toFixed(1));
+        if (newValStr !== null) {
+          const newVal = parseFloat(newValStr);
+          if (!isNaN(newVal) && newVal > 0) {
+            pushUndo();
+            changeDimension(hitDim, newVal);
+            updateStatus();
+            render();
+          }
+        }
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        drawing = null;
+        polyPoints = [];
+        activeParallelRelation = null;
+        activeTangentMarker = null;
+        dimAngleFirstLine = null;
+        setTool('select');
+        render();
+      }
+      if (e.key === 'Enter' && currentTool === 'polyline' && polyPoints.length > 1) {
+        pushUndo();
+        objects.push({ type: 'polyline', pts: [...polyPoints], color: currentColor, width: currentWidth });
+        polyPoints = []; drawing = null; activeParallelRelation = null; activeTangentMarker = null; updateStatus(); render();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); doUndo(); }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selected) {
+          pushUndo();
+          if (Array.isArray(selected)) {
+            objects = objects.filter(o => !selected.includes(o));
+          } else {
+            objects = objects.filter(o => o !== selected);
+          }
+          selected = null;
+          updateStatus();
+          render();
+        }
+      }
+      const keymap = { v: 'select', h: 'pan', l: 'line', c: 'circle', a: 'arc', m: 'move', e: 'delete', r: 'rect', t: 'trim', d: 'dim' };
+      if (!e.ctrlKey && !e.metaKey && keymap[e.key.toLowerCase()] && document.activeElement.tagName !== 'INPUT') {
+        setTool(keymap[e.key.toLowerCase()]);
+      }
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const r = canvas.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const [wx, wy] = screenToWorld(mx, my);
+      const delta = e.deltaY < 0 ? 1.1 : 0.9;
+      view.scale = Math.min(8, Math.max(0.15, view.scale * delta));
+      const [nx, ny] = worldToScreen(wx, wy);
+      view.ox += mx - nx; view.oy += my - ny;
+      document.getElementById('status-zoom').textContent = 'ZOOM: ' + Math.round(view.scale * 100) + '%';
+      render();
+    }, { passive: false });
+
+    function translateObj(obj, dx, dy, visited = new Set()) {
+      if (visited.has(obj)) return;
+      visited.add(obj);
+
+      if (obj.p1) obj.p1 = [obj.p1[0] + dx, obj.p1[1] + dy];
+      if (obj.p2) obj.p2 = [obj.p2[0] + dx, obj.p2[1] + dy];
+      if (obj.c) obj.c = [obj.c[0] + dx, obj.c[1] + dy];
+      if (obj.p) obj.p = [obj.p[0] + dx, obj.p[1] + dy];
+      if (obj.pts) obj.pts = obj.pts.map(p => [p[0] + dx, p[1] + dy]);
+
+      // Move dimensions linked to this object
+      objects.forEach(d => {
+        if (d.type === 'dim' && d.targetId === obj) {
+          translateObj(d, dx, dy, visited);
+        }
+      });
+    }
+
+    function hitTest(wx, wy) {
+      const tol = 8 / view.scale;
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const o = objects[i];
+        if (o.type === 'line' || o.type === 'dim') { if (distToSeg([wx, wy], o.p1, o.p2) < tol) return o; }
+        else if (o.type === 'rect' || o.type === 'hatch') {
+          const x1 = Math.min(o.p1[0], o.p2[0]), x2 = Math.max(o.p1[0], o.p2[0]);
+          const y1 = Math.min(o.p1[1], o.p2[1]), y2 = Math.max(o.p1[1], o.p2[1]);
+          if (wx >= x1 - tol && wx <= x2 + tol && wy >= y1 - tol && wy <= y2 + tol) return o;
+        }
+        else if (o.type === 'circle') { if (Math.abs(Math.hypot(wx - o.c[0], wy - o.c[1]) - o.r) < tol) return o; }
+        else if (o.type === 'ellipse') { const d = ((wx - o.c[0]) ** 2) / (o.rx ** 2) + ((wy - o.c[1]) ** 2) / (o.ry ** 2); if (d < 1.15 && d > 0.7) return o; }
+        else if (o.type === 'polyline' || o.type === 'freehand') { for (let j = 0; j < o.pts.length - 1; j++) { if (distToSeg([wx, wy], o.pts[j], o.pts[j + 1]) < tol) return o; } }
+        else if (o.type === 'text') { if (Math.hypot(wx - o.p[0], wy - o.p[1]) < tol * 3) return o; }
+        else if (o.type === 'arc') { if (Math.abs(Math.hypot(wx - o.c[0], wy - o.c[1]) - o.r) < tol) return o; }
+      }
+      return null;
+    }
+    
+    function distToSeg(p, a, b) {
+      const [px, py] = p, [ax, ay] = a, [bx, by] = b;
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const cx = ax + t * dx, cy = ay + t * dy;
+      return Math.hypot(px - cx, py - cy);
+    }
+
+    function get3CornerRectPoints(p1, p2, p3) {
+      const dx = p2[0] - p1[0];
+      const dy = p2[1] - p1[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) {
+        return [p1, p2, p3, [p1[0] + (p3[0] - p2[0]), p1[1] + (p3[1] - p2[1])], p1];
+      }
+      const ux = dx / len;
+      const uy = dy / len;
+      const nx = -uy;
+      const ny = ux;
+      const wx = p3[0] - p1[0];
+      const wy = p3[1] - p1[1];
+      const h = wx * nx + wy * ny;
+      const v3 = [p2[0] + h * nx, p2[1] + h * ny];
+      const v4 = [p1[0] + h * nx, p1[1] + h * ny];
+      return [p1, p2, v3, v4, p1];
+    }
+
+    function get3PointArc(p1, p2, p3) {
+      const [x1, y1] = p1;
+      const [x2, y2] = p2;
+      const [x3, y3] = p3;
+      const D = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
+      if (Math.abs(D) < 1e-6) return null;
+      
+      const cx = ((x1*x1 + y1*y1)*(y2 - y3) + (x2*x2 + y2*y2)*(y3 - y1) + (x3*x3 + y3*y3)*(y1 - y2)) / D;
+      const cy = ((x1*x1 + y1*y1)*(x3 - x2) + (x2*x2 + y2*y2)*(x1 - x3) + (x3*x3 + y3*y3)*(x2 - x1)) / D;
+      const r = Math.hypot(x1 - cx, y1 - cy);
+      const a0 = Math.atan2(y1 - cy, x1 - cx);
+      const a1 = Math.atan2(y3 - cy, x3 - cx);
+      const a2 = Math.atan2(y2 - cy, x2 - cx);
+      
+      const inCw = isAngleBetween(a2, a0, a1, false);
+      const ccw = !inCw;
+      return { c: [cx, cy], r, a0, a1, ccw };
+    }
+
+    function isAngleBetween(a, a0, a1, ccw) {
+      let diff = (a1 - a0) % (2 * Math.PI);
+      if (diff < 0) diff += 2 * Math.PI;
+      let adiff = (a - a0) % (2 * Math.PI);
+      if (adiff < 0) adiff += 2 * Math.PI;
+      if (ccw) {
+        return adiff >= diff;
+      } else {
+        return adiff <= diff;
+      }
+    }
+
+    function getArcMidpoint(c, r, a0, a1, ccw) {
+      let diff = a1 - a0;
+      if (ccw) {
+        if (diff > 0) diff -= 2 * Math.PI;
+      } else {
+        if (diff < 0) diff += 2 * Math.PI;
+      }
+      const midAngle = a0 + diff / 2;
+      return [c[0] + r * Math.cos(midAngle), c[1] + r * Math.sin(midAngle)];
+    }
+
+    function findNearestSegment(wx, wy) {
+      const tol = 25 / view.scale;
+      const segs = getAllSegments();
+      let best = null, bestDist = tol;
+      segs.forEach(seg => {
+        const d = distToSeg([wx, wy], seg.p1, seg.p2);
+        if (d < bestDist) {
+          bestDist = d;
+          best = seg;
+        }
+      });
+      return best;
+    }
+
+    function findConnection(line1, line2) {
+      if (!line1 || !line2 || line1.type !== 'line' || line2.type !== 'line') return null;
+      
+      const p1 = line1.p1, p2 = line1.p2;
+      const q1 = line2.p1, q2 = line2.p2;
+      const dx1 = p2[0] - p1[0], dy1 = p2[1] - p1[1];
+      const dx2 = q2[0] - q1[0], dy2 = q2[1] - q1[1];
+      const det = dx1 * dy2 - dy1 * dx2;
+      
+      if (Math.abs(det) < 1e-5) return null; // parallel, no intersection
+      
+      const t = ((q1[0] - p1[0]) * dy2 - (q1[1] - p1[1]) * dx2) / det;
+      const C = [p1[0] + t * dx1, p1[1] + t * dy1];
+      
+      const dist1a = Math.hypot(p1[0] - C[0], p1[1] - C[1]);
+      const dist1b = Math.hypot(p2[0] - C[0], p2[1] - C[1]);
+      const A = dist1a > dist1b ? p1 : p2;
+      
+      const dist2a = Math.hypot(q1[0] - C[0], q1[1] - C[1]);
+      const dist2b = Math.hypot(q2[0] - C[0], q2[1] - C[1]);
+      const B = dist2a > dist2b ? q1 : q2;
+      
+      return { vertex: C, p1: A, p2: B };
+    }
+
+    let activeTrackingGuides = { h: null, v: null };
+
+    function getTrackPoints() {
+      const pts = [];
+      objects.forEach(o => {
+        if (o.type === 'line' || o.type === 'dim') {
+          pts.push({ x: o.p1[0], y: o.p1[1] });
+          pts.push({ x: o.p2[0], y: o.p2[1] });
+          pts.push({ x: (o.p1[0] + o.p2[0]) / 2, y: (o.p1[1] + o.p2[1]) / 2 }); // Midpoint
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          const x1 = o.p1[0], y1 = o.p1[1], x2 = o.p2[0], y2 = o.p2[1];
+          pts.push({ x: x1, y: y1 });
+          pts.push({ x: x2, y: y1 });
+          pts.push({ x: x2, y: y2 });
+          pts.push({ x: x1, y: y2 });
+          pts.push({ x: (x1 + x2) / 2, y: y1 });
+          pts.push({ x: (x1 + x2) / 2, y: y2 });
+          pts.push({ x: x1, y: (y1 + y2) / 2 });
+          pts.push({ x: x2, y: (y1 + y2) / 2 });
+          pts.push({ x: (x1 + x2) / 2, y: (y1 + y2) / 2 }); // Center
+        } else if (o.type === 'polyline') {
+          o.pts.forEach(p => pts.push({ x: p[0], y: p[1] }));
+          for (let i = 0; i < o.pts.length - 1; i++) {
+            pts.push({ x: (o.pts[i][0] + o.pts[i+1][0]) / 2, y: (o.pts[i][1] + o.pts[i+1][1]) / 2 }); // Segment midpoints
+          }
+        } else if (o.type === 'circle' || o.type === 'arc' || o.type === 'ellipse') {
+          pts.push({ x: o.c[0], y: o.c[1] }); // Center
+          if (o.type === 'circle') {
+            pts.push({ x: o.c[0], y: o.c[1] - o.r });
+            pts.push({ x: o.c[0], y: o.c[1] + o.r });
+            pts.push({ x: o.c[0] - o.r, y: o.c[1] });
+            pts.push({ x: o.c[0] + o.r, y: o.c[1] });
+          } else if (o.type === 'arc') {
+            pts.push({ x: o.c[0] + o.r * Math.cos(o.a0), y: o.c[1] + o.r * Math.sin(o.a0) });
+            pts.push({ x: o.c[0] + o.r * Math.cos(o.a1), y: o.c[1] + o.r * Math.sin(o.a1) });
+          }
+        }
+      });
+      return pts;
+    }
+
+    function checkAlignmentSnaps(wx, wy) {
+      activeTrackingGuides = { h: null, v: null };
+      if (!snapOn) return [wx, wy];
+
+      const tol = 8 / view.scale;
+      const pts = getTrackPoints();
+      let snappedX = wx;
+      let snappedY = wy;
+      
+      let bestH = null, bestHDist = tol;
+      let bestV = null, bestVDist = tol;
+
+      pts.forEach(pt => {
+        // Check horizontal alignment (same Y)
+        const distY = Math.abs(wy - pt.y);
+        if (distY < bestHDist) {
+          bestHDist = distY;
+          bestH = pt;
+        }
+        // Check vertical alignment (same X)
+        const distX = Math.abs(wx - pt.x);
+        if (distX < bestVDist) {
+          bestVDist = distX;
+          bestV = pt;
+        }
+      });
+
+      if (bestH) {
+        snappedY = bestH.y;
+        activeTrackingGuides.h = bestH;
+      }
+      if (bestV) {
+        snappedX = bestV.x;
+        activeTrackingGuides.v = bestV;
+      }
+
+      return [snappedX, snappedY];
+    }
+
+    function drawAlignmentGuides() {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 180, 62, 0.8)'; // Amber color
+      ctx.lineWidth = 1.0;
+      ctx.setLineDash([5, 5]);
+      
+      const mouseScreen = worldToScreen(mouse.wx, mouse.wy);
+      const cursorX = mouseScreen[0];
+      const cursorY = mouseScreen[1];
+
+      if (activeTrackingGuides.h) {
+        const ptScreen = worldToScreen(activeTrackingGuides.h.x, activeTrackingGuides.h.y);
+        ctx.beginPath();
+        ctx.moveTo(ptScreen[0], ptScreen[1]);
+        ctx.lineTo(cursorX, ptScreen[1]);
+        ctx.stroke();
+
+        // Draw small dot on alignment source point
+        ctx.fillStyle = 'var(--amber)';
+        ctx.beginPath();
+        ctx.arc(ptScreen[0], ptScreen[1], 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (activeTrackingGuides.v) {
+        const ptScreen = worldToScreen(activeTrackingGuides.v.x, activeTrackingGuides.v.y);
+        ctx.beginPath();
+        ctx.moveTo(ptScreen[0], ptScreen[1]);
+        ctx.lineTo(ptScreen[0], cursorY);
+        ctx.stroke();
+
+        // Draw small dot on alignment source point
+        ctx.fillStyle = 'var(--amber)';
+        ctx.beginPath();
+        ctx.arc(ptScreen[0], ptScreen[1], 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    function hitTestDim(wx, wy) {
+      const tol = 12 / view.scale;
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const o = objects[i];
+        if (o.type === 'dim') {
+          if (o.dimType === 'angle') {
+            let angleRad = o.a1 - o.a0;
+            if (angleRad < 0) angleRad += 2 * Math.PI;
+            if (angleRad > Math.PI) angleRad = 2 * Math.PI - angleRad;
+            const midAngle = o.a0 + angleRad / 2;
+            const textPt = [o.c[0] + (o.r + 8) * Math.cos(midAngle), o.c[1] + (o.r + 8) * Math.sin(midAngle)];
+            if (Math.hypot(wx - textPt[0], wy - textPt[1]) < tol * 1.5) return o;
+            
+            const distToArcCenter = Math.hypot(wx - o.c[0], wy - o.c[1]);
+            if (Math.abs(distToArcCenter - o.r) < tol) {
+              const ang = Math.atan2(wy - o.c[1], wx - o.c[0]);
+              if (isAngleBetween(ang, o.a0, o.a1, o.ccw)) return o;
+            }
+          } else {
+            const mid = [(o.p1[0] + o.p2[0]) / 2, (o.p1[1] + o.p2[1]) / 2];
+            if (Math.hypot(wx - mid[0], wy - mid[1]) < tol * 1.5) return o;
+            if (distToSeg([wx, wy], o.p1, o.p2) < tol) return o;
+          }
+        }
+      }
+      return null;
+    }
+
+    function getDimensionValue(dim) {
+      if (dim.dimType === 'angle') {
+        let angleRad = dim.a1 - dim.a0;
+        if (angleRad < 0) angleRad += 2 * Math.PI;
+        if (angleRad > Math.PI) angleRad = 2 * Math.PI - angleRad;
+        return angleRad * 180 / Math.PI;
+      }
+      if (dim.dimType === 'radius' && dim.targetId && objects.includes(dim.targetId)) {
+        return dim.targetId.r;
+      }
+      if (dim.dimType === 'lineLength' && dim.targetId && objects.includes(dim.targetId)) {
+        const target = dim.targetId;
+        if (target.type === 'rect' || target.type === 'hatch') {
+          const rx1 = Math.min(target.p1[0], target.p2[0]), rx2 = Math.max(target.p1[0], target.p2[0]);
+          const ry1 = Math.min(target.p1[1], target.p2[1]), ry2 = Math.max(target.p1[1], target.p2[1]);
+          const sides = [
+            [[rx1, ry1], [rx2, ry1]],
+            [[rx2, ry1], [rx2, ry2]],
+            [[rx1, ry2], [rx2, ry2]],
+            [[rx1, ry1], [rx1, ry2]]
+          ];
+          const sideIdx = dim.rectSide !== undefined ? dim.rectSide : 0;
+          const tp1 = sides[sideIdx][0];
+          const tp2 = sides[sideIdx][1];
+          return Math.hypot(tp2[0] - tp1[0], tp2[1] - tp1[1]);
+        }
+        return Math.hypot(target.p2[0] - target.p1[0], target.p2[1] - target.p1[1]);
+      }
+      return Math.hypot(dim.p2[0] - dim.p1[0], dim.p2[1] - dim.p1[1]);
+    }
+
+    function changeDimension(dim, newVal) {
+      if (dim.dimType === 'angle' && dim.targetId1 && dim.targetId2 && objects.includes(dim.targetId1) && objects.includes(dim.targetId2)) {
+        const line1 = dim.targetId1;
+        const line2 = dim.targetId2;
+        const connection = findConnection(line1, line2);
+        if (connection) {
+          const c = connection.vertex;
+          const A = connection.p1;
+          const B = connection.p2;
+          
+          const ang1 = Math.atan2(A[1] - c[1], A[0] - c[0]);
+          const currentAng2 = Math.atan2(B[1] - c[1], B[0] - c[0]);
+          
+          const targetAngleRad = newVal * Math.PI / 180;
+          
+          let diff = currentAng2 - ang1;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          while (diff > Math.PI) diff -= 2 * Math.PI;
+          const direction = Math.sign(diff) || 1;
+          
+          const newAng2 = ang1 + direction * targetAngleRad;
+          
+          const len2 = Math.hypot(B[0] - c[0], B[1] - c[1]);
+          const newB = [
+            c[0] + len2 * Math.cos(newAng2),
+            c[1] + len2 * Math.sin(newAng2)
+          ];
+          
+          const oldB = [...B];
+          if (Math.hypot(line2.p1[0] - B[0], line2.p1[1] - B[1]) < 0.1) {
+            line2.p1 = newB;
+          } else {
+            line2.p2 = newB;
+          }
+          
+          propagateEndpointMove(oldB, newB, line2);
+        }
+      } else if (dim.dimType === 'radius' && dim.targetId && objects.includes(dim.targetId)) {
+        const target = dim.targetId;
+        target.r = newVal;
+        const angle = Math.atan2(dim.p2[1] - dim.p1[1], dim.p2[0] - dim.p1[0]);
+        dim.p2 = [dim.p1[0] + newVal * Math.cos(angle), dim.p1[1] + newVal * Math.sin(angle)];
+      } else {
+        let targetLine = null;
+        if (dim.dimType === 'lineLength' && dim.targetId && objects.includes(dim.targetId)) {
+          targetLine = dim.targetId;
+        } else {
+          targetLine = findLineMeasuring(dim);
+        }
+
+        if (targetLine) {
+          if (targetLine.type === 'rect' || targetLine.type === 'hatch') {
+            const sideIdx = dim.rectSide !== undefined ? dim.rectSide : 0;
+            const wSign = Math.sign(targetLine.p2[0] - targetLine.p1[0]) || 1;
+            const hSign = Math.sign(targetLine.p2[1] - targetLine.p1[1]) || 1;
+            const oldP2 = [...targetLine.p2];
+            
+            if (sideIdx === 0 || sideIdx === 2) {
+              targetLine.p2[0] = targetLine.p1[0] + wSign * newVal;
+            } else {
+              targetLine.p2[1] = targetLine.p1[1] + hSign * newVal;
+            }
+            
+            propagateEndpointMove(oldP2, targetLine.p2, targetLine);
+          } else {
+            const oldP1 = [...targetLine.p1];
+            const oldP2 = [...targetLine.p2];
+            
+            const dx = oldP2[0] - oldP1[0];
+            const dy = oldP2[1] - oldP1[1];
+            const oldLen = Math.hypot(dx, dy);
+            if (oldLen < 1e-4) return;
+            
+            const p2New = [
+              oldP1[0] + dx * (newVal / oldLen),
+              oldP1[1] + dy * (newVal / oldLen)
+            ];
+            
+            targetLine.p2 = p2New;
+            propagateEndpointMove(oldP2, p2New, targetLine);
+            
+            const ox = dim.p2[0] - oldP2[0];
+            const oy = dim.p2[1] - oldP2[1];
+            dim.p2 = [p2New[0] + ox, p2New[1] + oy];
+          }
+        }
+      }
+    }
+
+    function findLineMeasuring(dim) {
+      const eps = 1.0;
+      for (let o of objects) {
+        if (o.type === 'line') {
+          const matchNormal = Math.hypot(o.p1[0] - dim.p1[0], o.p1[1] - dim.p1[1]) < eps &&
+                              Math.hypot(o.p2[0] - dim.p2[0], o.p2[1] - dim.p2[1]) < eps;
+          const matchReverse = Math.hypot(o.p1[0] - dim.p2[0], o.p1[1] - dim.p2[1]) < eps &&
+                               Math.hypot(o.p2[0] - dim.p1[0], o.p2[1] - dim.p1[1]) < eps;
+          if (matchNormal || matchReverse) return o;
+        }
+      }
+      for (let o of objects) {
+        if (o.type === 'line') {
+          const dLine = [o.p2[0] - o.p1[0], o.p2[1] - o.p1[1]];
+          const dDim = [dim.p2[0] - dim.p1[0], dim.p2[1] - dim.p1[1]];
+          const dot = dLine[0] * dDim[0] + dLine[1] * dDim[1];
+          const cross = dLine[0] * dDim[1] - dLine[1] * dDim[0];
+          if (Math.abs(cross) < 1e-2) {
+            const dist1 = distToSeg(o.p1, dim.p1, dim.p2);
+            const dist2 = distToSeg(o.p2, dim.p1, dim.p2);
+            if (dist1 < 25.1 && dist2 < 25.1) {
+              return o;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    function propagateEndpointMove(oldPt, newPt, ignoreObj) {
+      const eps = 1e-3;
+      const isSame = (p) => Math.hypot(p[0] - oldPt[0], p[1] - oldPt[1]) < eps;
+      
+      objects.forEach(o => {
+        if (o === ignoreObj) return;
+        
+        if (o.type === 'line' || o.type === 'dim') {
+          if (isSame(o.p1)) o.p1 = [...newPt];
+          if (isSame(o.p2)) o.p2 = [...newPt];
+        } else if (o.type === 'polyline' || o.type === 'freehand') {
+          o.pts.forEach((p, idx) => {
+            if (isSame(p)) o.pts[idx] = [...newPt];
+          });
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          if (isSame(o.p1)) o.p1 = [...newPt];
+          if (isSame(o.p2)) o.p2 = [...newPt];
+        }
+      });
+    }
+
+    function isSameSeg(s1, s2) {
+      if (!s1 || !s2) return false;
+      if (s1.parent && s2.parent && s1.parent === s2.parent) {
+        if (s1.parent.type === 'line' || s1.parent.type === 'dim') return true;
+      }
+      const eps = 1e-4;
+      const matchNormal = Math.hypot(s1.p1[0] - s2.p1[0], s1.p1[1] - s2.p1[1]) < eps &&
+                          Math.hypot(s1.p2[0] - s2.p2[0], s1.p2[1] - s2.p2[1]) < eps;
+      const matchReverse = Math.hypot(s1.p1[0] - s2.p2[0], s1.p1[1] - s2.p2[1]) < eps &&
+                           Math.hypot(s1.p2[0] - s2.p1[0], s1.p2[1] - s2.p1[1]) < eps;
+      return matchNormal || matchReverse;
+    }
+
+    function getTanTanCircle(seg1, seg2, mousePt) {
+      const p1 = seg1.p1, p2 = seg1.p2;
+      const q1 = seg2.p1, q2 = seg2.p2;
+      const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1];
+      const d2x = q2[0] - q1[0], d2y = q2[1] - q1[1];
+      const det = d1x * d2y - d1y * d2x;
+
+      if (Math.abs(det) < 1e-5) {
+        const len1 = Math.hypot(d1x, d1y);
+        if (len1 < 1e-6) return null;
+        const ux = d1x / len1, uy = d1y / len1;
+        const nx = -uy, ny = ux;
+        const dist = (q1[0] - p1[0]) * nx + (q1[1] - p1[1]) * ny;
+        const r = Math.abs(dist) / 2;
+        const mx0 = p1[0] + (dist / 2) * nx;
+        const my0 = p1[1] + (dist / 2) * ny;
+        const t = (mousePt[0] - mx0) * ux + (mousePt[1] - my0) * uy;
+        return { c: [mx0 + t * ux, my0 + t * uy], r };
+      } else {
+        const t1 = ((q1[0] - p1[0]) * d2y - (q1[1] - p1[1]) * d2x) / det;
+        const vx = p1[0] + t1 * d1x;
+        const vy = p1[1] + t1 * d1y;
+        const len1 = Math.hypot(d1x, d1y);
+        const len2 = Math.hypot(d2x, d2y);
+        let u1x = d1x / len1, u1y = d1y / len1;
+        let u2x = d2x / len2, u2y = d2y / len2;
+        const mvx = mousePt[0] - vx, mvy = mousePt[1] - vy;
+        if (mvx * u1x + mvy * u1y < 0) { u1x = -u1x; u1y = -u1y; }
+        if (mvx * u2x + mvy * u2y < 0) { u2x = -u2x; u2y = -u2y; }
+        const bx = u1x + u2x, by = u1y + u2y;
+        const blen = Math.hypot(bx, by);
+        if (blen < 1e-6) return null;
+        const bux = bx / blen, buy = by / blen;
+        const cosTheta = u1x * u2x + u1y * u2y;
+        const theta = Math.acos(Math.max(-1, Math.min(1, cosTheta)));
+        const sinHalf = Math.sin(theta / 2);
+        if (sinHalf < 1e-4) return null;
+        const distV = mvx * bux + mvy * buy;
+        if (distV <= 0) return null;
+        return { c: [vx + distV * bux, vy + distV * buy], r: distV * sinHalf };
+      }
+    }
+
+    function getTanTanTanCircle(seg1, seg2, seg3) {
+      const intersect = (s1, s2) => {
+        const p1 = s1.p1, p2 = s1.p2;
+        const q1 = s2.p1, q2 = s2.p2;
+        const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1];
+        const d2x = q2[0] - q1[0], d2y = q2[1] - q1[1];
+        const det = d1x * d2y - d1y * d2x;
+        if (Math.abs(det) < 1e-5) return null;
+        const t = ((q1[0] - p1[0]) * d2y - (q1[1] - p1[1]) * d2x) / det;
+        return [p1[0] + t * d1x, p1[1] + t * d1y];
+      };
+      const A = intersect(seg1, seg2);
+      const B = intersect(seg2, seg3);
+      const C = intersect(seg3, seg1);
+      if (!A || !B || !C) return null;
+      const a = Math.hypot(B[0] - C[0], B[1] - C[1]);
+      const b = Math.hypot(C[0] - A[0], C[1] - A[1]);
+      const c = Math.hypot(A[0] - B[0], A[1] - B[1]);
+      const perimeter = a + b + c;
+      if (perimeter < 1e-5) return null;
+      const cx = (a * A[0] + b * B[0] + c * C[0]) / perimeter;
+      const cy = (a * A[1] + b * B[1] + c * C[1]) / perimeter;
+      const area = 0.5 * Math.abs((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]));
+      return { c: [cx, cy], r: area / (perimeter / 2) };
+    }
+
+    function getLineIntersection(a1, a2, b1, b2) {
+      const det = (a2[0] - a1[0]) * (b2[1] - b1[1]) - (a2[1] - a1[1]) * (b2[0] - b1[0]);
+      if (Math.abs(det) < 1e-9) return null;
+
+      const t = ((b1[0] - a1[0]) * (b2[1] - b1[1]) - (b1[1] - a1[1]) * (b2[0] - b1[0])) / det;
+      const u = ((b1[0] - a1[0]) * (a2[1] - a1[1]) - (b1[1] - a1[1]) * (a2[0] - a1[0])) / det;
+
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return {
+          x: a1[0] + t * (a2[0] - a1[0]),
+          y: a1[1] + t * (a2[1] - a1[1]),
+          t: t
+        };
+      }
+      return null;
+    }
+
+    function getLineCircleIntersections(p1, p2, c, r) {
+      const dx = p2[0] - p1[0];
+      const dy = p2[1] - p1[1];
+      const fx = p1[0] - c[0];
+      const fy = p1[1] - c[1];
+      
+      const a = dx * dx + dy * dy;
+      if (a < 1e-9) return [];
+      const b = 2 * (fx * dx + fy * dy);
+      const constC = fx * fx + fy * fy - r * r;
+      
+      const discriminant = b * b - 4 * a * constC;
+      if (discriminant < 0) return [];
+      
+      const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
+      const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
+      
+      const points = [];
+      const eps = 1e-5;
+      if (t1 >= -eps && t1 <= 1 + eps) {
+        const clampedT1 = Math.max(0, Math.min(1, t1));
+        points.push({ x: p1[0] + clampedT1 * dx, y: p1[1] + clampedT1 * dy, t: clampedT1 });
+      }
+      if (t2 >= -eps && t2 <= 1 + eps && Math.abs(t2 - t1) > 1e-4) {
+        const clampedT2 = Math.max(0, Math.min(1, t2));
+        points.push({ x: p1[0] + clampedT2 * dx, y: p1[1] + clampedT2 * dy, t: clampedT2 });
+      }
+      return points;
+    }
+
+    function getCircleCircleIntersections(c1, r1, c2, r2) {
+      const d = Math.hypot(c2[0] - c1[0], c2[1] - c1[1]);
+      if (d > r1 + r2 || d < Math.abs(r1 - r2) || d < 1e-6) return [];
+      
+      const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+      const h = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+      
+      const ux = (c2[0] - c1[0]) / d;
+      const uy = (c2[1] - c1[1]) / d;
+      
+      const x2 = c1[0] + a * ux;
+      const y2 = c1[1] + a * uy;
+      
+      return [
+        { x: x2 + h * (-uy), y: y2 + h * ux },
+        { x: x2 - h * (-uy), y: y2 - h * ux }
+      ];
+    }
+
+    function getCircleIntersections(o, allObjects) {
+      const ips = [];
+      allObjects.forEach(other => {
+        if (other === o) return;
+        if (other.type === 'line' || other.type === 'dim') {
+          const pts = getLineCircleIntersections(other.p1, other.p2, o.c, o.r);
+          pts.forEach(pt => ips.push(pt));
+        } else if (other.type === 'polyline') {
+          for (let i = 0; i < other.pts.length - 1; i++) {
+            const pts = getLineCircleIntersections(other.pts[i], other.pts[i+1], o.c, o.r);
+            pts.forEach(pt => ips.push(pt));
+          }
+        } else if (other.type === 'rect' || other.type === 'hatch') {
+          const x1 = other.p1[0], y1 = other.p1[1], x2 = other.p2[0], y2 = other.p2[1];
+          const segs = [
+            [[x1, y1], [x2, y1]],
+            [[x2, y1], [x2, y2]],
+            [[x2, y2], [x1, y2]],
+            [[x1, y2], [x1, y1]]
+          ];
+          segs.forEach(seg => {
+            const pts = getLineCircleIntersections(seg[0], seg[1], o.c, o.r);
+            pts.forEach(pt => ips.push(pt));
+          });
+        } else if (other.type === 'circle') {
+          const pts = getCircleCircleIntersections(o.c, o.r, other.c, other.r);
+          pts.forEach(pt => ips.push(pt));
+        } else if (other.type === 'arc') {
+          const pts = getCircleCircleIntersections(o.c, o.r, other.c, other.r);
+          pts.forEach(pt => {
+            const angle = Math.atan2(pt.y - other.c[1], pt.x - other.c[0]);
+            if (isAngleBetween(angle, other.a0, other.a1, other.ccw)) {
+              ips.push(pt);
+            }
+          });
+        }
+      });
+      const uniqueIps = [];
+      ips.forEach(pt => {
+        if (!uniqueIps.some(u => Math.hypot(u.x - pt.x, u.y - pt.y) < 1e-4)) {
+          uniqueIps.push(pt);
+        }
+      });
+      return uniqueIps;
+    }
+
+    function distToArc(pt, c, r, a0, a1, ccw) {
+      const [px, py] = pt;
+      const angle = Math.atan2(py - c[1], px - c[0]);
+      if (isAngleBetween(angle, a0, a1, ccw)) {
+        return Math.abs(Math.hypot(px - c[0], py - c[1]) - r);
+      }
+      const pStart = [c[0] + r * Math.cos(a0), c[1] + r * Math.sin(a0)];
+      const pEnd = [c[0] + r * Math.cos(a1), c[1] + r * Math.sin(a1)];
+      return Math.min(
+        Math.hypot(px - pStart[0], py - pStart[1]),
+        Math.hypot(px - pEnd[0], py - pEnd[1])
+      );
+    }
+
+    function isArcSegmentTrimmed(c, r, a0, a1, ccw, fenceStart, fenceEnd, isClick) {
+      if (isClick) {
+        const dist = distToArc(fenceStart, c, r, a0, a1, ccw);
+        return dist < (8 / view.scale);
+      } else {
+        const ips = getLineCircleIntersections(fenceStart, fenceEnd, c, r);
+        return ips.some(ip => {
+          const angle = Math.atan2(ip.y - c[1], ip.x - c[0]);
+          return isAngleBetween(angle, a0, a1, ccw);
+        });
+      }
+    }
+
+    function performTrim(fenceStart, fenceEnd) {
+      const isClick = Math.hypot(fenceEnd[0] - fenceStart[0], fenceEnd[1] - fenceStart[1]) < (5 / view.scale);
+
+      // Gather all segments on canvas for intersection calculation
+      const allSegs = [];
+      objects.forEach(o => {
+        if (o.type === 'line') {
+          allSegs.push({ p1: o.p1, p2: o.p2, parent: o });
+        } else if (o.type === 'polyline') {
+          for (let i = 0; i < o.pts.length - 1; i++) {
+            allSegs.push({ p1: o.pts[i], p2: o.pts[i + 1], parent: o });
+          }
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          const x1 = o.p1[0], y1 = o.p1[1], x2 = o.p2[0], y2 = o.p2[1];
+          allSegs.push({ p1: [x1, y1], p2: [x2, y1], parent: o });
+          allSegs.push({ p1: [x2, y1], p2: [x2, y2], parent: o });
+          allSegs.push({ p1: [x2, y2], p2: [x1, y2], parent: o });
+          allSegs.push({ p1: [x1, y2], p2: [x1, y1], parent: o });
+        }
+      });
+
+      let modified = false;
+      let newObjects = [...objects];
+
+      objects.forEach(o => {
+        if (o.type !== 'line' && o.type !== 'polyline' && o.type !== 'rect' && o.type !== 'hatch' && o.type !== 'circle' && o.type !== 'arc') return;
+
+        let oModified = false;
+
+        if (o.type === 'line' || o.type === 'polyline' || o.type === 'rect' || o.type === 'hatch') {
+          const objSegs = [];
+          if (o.type === 'line') {
+            objSegs.push({ p1: o.p1, p2: o.p2 });
+          } else if (o.type === 'polyline') {
+            for (let i = 0; i < o.pts.length - 1; i++) {
+              objSegs.push({ p1: o.pts[i], p2: o.pts[i + 1] });
+            }
+          } else if (o.type === 'rect' || o.type === 'hatch') {
+            const x1 = o.p1[0], y1 = o.p1[1], x2 = o.p2[0], y2 = o.p2[1];
+            objSegs.push({ p1: [x1, y1], p2: [x2, y1] });
+            objSegs.push({ p1: [x2, y1], p2: [x2, y2] });
+            objSegs.push({ p1: [x2, y2], p2: [x1, y2] });
+            objSegs.push({ p1: [x1, y2], p2: [x1, y1] });
+          }
+
+          const segmentsToKeep = [];
+
+          objSegs.forEach(seg => {
+            const ips = [];
+            allSegs.forEach(other => {
+              if (other.parent === o) return;
+              const ip = getLineIntersection(seg.p1, seg.p2, other.p1, other.p2);
+              if (ip) {
+                if (!ips.some(p => Math.hypot(p.x - ip.x, p.y - ip.y) < 1e-4)) {
+                  ips.push(ip);
+                }
+              }
+            });
+
+            // Also intersect with circles and arcs
+            objects.forEach(other => {
+              if (other === o) return;
+              if (other.type === 'circle') {
+                const pts = getLineCircleIntersections(seg.p1, seg.p2, other.c, other.r);
+                pts.forEach(pt => {
+                  if (!ips.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) < 1e-4)) {
+                    ips.push(pt);
+                  }
+                });
+              } else if (other.type === 'arc') {
+                const pts = getLineCircleIntersections(seg.p1, seg.p2, other.c, other.r);
+                pts.forEach(pt => {
+                  const angle = Math.atan2(pt.y - other.c[1], pt.x - other.c[0]);
+                  if (isAngleBetween(angle, other.a0, other.a1, other.ccw)) {
+                    if (!ips.some(p => Math.hypot(p.x - pt.x, p.y - pt.y) < 1e-4)) {
+                      ips.push(pt);
+                    }
+                  }
+                });
+              }
+            });
+
+            ips.sort((a, b) => a.t - b.t);
+
+            const subSegs = [];
+            let prevPt = seg.p1;
+            for (let i = 0; i <= ips.length; i++) {
+              const nextPt = (i === ips.length) ? seg.p2 : [ips[i].x, ips[i].y];
+              if (Math.hypot(nextPt[0] - prevPt[0], nextPt[1] - prevPt[1]) > 0.01) {
+                subSegs.push({ p1: prevPt, p2: nextPt });
+              }
+              prevPt = nextPt;
+            }
+
+            subSegs.forEach(sub => {
+              let isTrimmed = false;
+              if (isClick) {
+                const dist = distToSeg(fenceStart, sub.p1, sub.p2);
+                if (dist < (8 / view.scale)) {
+                  isTrimmed = true;
+                }
+              } else {
+                const cross = getLineIntersection(sub.p1, sub.p2, fenceStart, fenceEnd);
+                if (cross) {
+                  isTrimmed = true;
+                }
+              }
+
+              if (isTrimmed) {
+                oModified = true;
+                modified = true;
+              } else {
+                segmentsToKeep.push(sub);
+              }
+            });
+          });
+
+          if (oModified) {
+            newObjects = newObjects.filter(item => item !== o);
+            segmentsToKeep.forEach(seg => {
+              newObjects.push({
+                type: 'line',
+                p1: seg.p1,
+                p2: seg.p2,
+                color: o.color || currentColor,
+                width: o.width || currentWidth
+              });
+            });
+          }
+        } else if (o.type === 'circle') {
+          let ips = getCircleIntersections(o, objects);
+          if (ips.length === 0) {
+            let isCircleTrimmed = false;
+            if (isClick) {
+              const dist = Math.abs(Math.hypot(fenceStart[0] - o.c[0], fenceStart[1] - o.c[1]) - o.r);
+              isCircleTrimmed = dist < (8 / view.scale);
+            } else {
+              const fenceIps = getLineCircleIntersections(fenceStart, fenceEnd, o.c, o.r);
+              isCircleTrimmed = (fenceIps.length > 0);
+            }
+            if (isCircleTrimmed) {
+              oModified = true;
+              modified = true;
+              newObjects = newObjects.filter(item => item !== o);
+            }
+          } else {
+            if (ips.length === 1) {
+              if (isClick) {
+                const angle = Math.atan2(fenceStart[1] - o.c[1], fenceStart[0] - o.c[0]);
+                ips.push({
+                  x: o.c[0] + o.r * Math.cos(angle),
+                  y: o.c[1] + o.r * Math.sin(angle)
+                });
+              } else {
+                const fenceIps = getLineCircleIntersections(fenceStart, fenceEnd, o.c, o.r);
+                if (fenceIps.length > 0) {
+                  fenceIps.forEach(ip => ips.push(ip));
+                } else {
+                  const fmid = [(fenceStart[0] + fenceEnd[0]) / 2, (fenceStart[1] + fenceEnd[1]) / 2];
+                  const angle = Math.atan2(fmid[1] - o.c[1], fmid[0] - o.c[0]);
+                  ips.push({
+                    x: o.c[0] + o.r * Math.cos(angle),
+                    y: o.c[1] + o.r * Math.sin(angle)
+                  });
+                }
+              }
+            }
+
+            const uniqueIps = [];
+            ips.forEach(pt => {
+              if (!uniqueIps.some(u => Math.hypot(u.x - pt.x, u.y - pt.y) < 1e-4)) {
+                uniqueIps.push(pt);
+              }
+            });
+            ips = uniqueIps;
+
+            if (ips.length >= 2) {
+              const angles = ips.map(ip => Math.atan2(ip.y - o.c[1], ip.x - o.c[0]));
+              angles.sort((a, b) => a - b);
+              
+              const subArcs = [];
+              for (let i = 0; i < angles.length; i++) {
+                const a0 = angles[i];
+                const a1 = angles[(i + 1) % angles.length];
+                subArcs.push({ a0, a1 });
+              }
+              
+              const arcsToKeep = [];
+              subArcs.forEach(sub => {
+                const isTrimmed = isArcSegmentTrimmed(o.c, o.r, sub.a0, sub.a1, false, fenceStart, fenceEnd, isClick);
+                if (isTrimmed) {
+                  oModified = true;
+                  modified = true;
+                } else {
+                  arcsToKeep.push(sub);
+                }
+              });
+              
+              if (oModified) {
+                newObjects = newObjects.filter(item => item !== o);
+                arcsToKeep.forEach(sub => {
+                  newObjects.push({
+                    type: 'arc',
+                    c: o.c,
+                    r: o.r,
+                    a0: sub.a0,
+                    a1: sub.a1,
+                    ccw: false,
+                    color: o.color || currentColor,
+                    width: o.width || currentWidth
+                  });
+                });
+              }
+            }
+          }
+        } else if (o.type === 'arc') {
+          const ips = getCircleIntersections({ c: o.c, r: o.r, type: 'circle' }, objects);
+          const arcIps = ips.filter(ip => isAngleBetween(Math.atan2(ip.y - o.c[1], ip.x - o.c[0]), o.a0, o.a1, o.ccw));
+          
+          if (arcIps.length === 0) {
+            if (isArcSegmentTrimmed(o.c, o.r, o.a0, o.a1, o.ccw, fenceStart, fenceEnd, isClick)) {
+              oModified = true;
+              modified = true;
+              newObjects = newObjects.filter(item => item !== o);
+            }
+          } else {
+            const ptsWithRel = arcIps.map(ip => {
+              const ang = Math.atan2(ip.y - o.c[1], ip.x - o.c[0]);
+              let rel = (ang - o.a0) % (2 * Math.PI);
+              if (o.ccw) {
+                if (rel > 0) rel -= 2 * Math.PI;
+              } else {
+                if (rel < 0) rel += 2 * Math.PI;
+              }
+              return { ang, rel: Math.abs(rel) };
+            });
+            
+            ptsWithRel.sort((a, b) => a.rel - b.rel);
+            
+            const subArcs = [];
+            let prevAng = o.a0;
+            for (let i = 0; i <= ptsWithRel.length; i++) {
+              const nextAng = (i === ptsWithRel.length) ? o.a1 : ptsWithRel[i].ang;
+              subArcs.push({ a0: prevAng, a1: nextAng });
+              prevAng = nextAng;
+            }
+            
+            const arcsToKeep = [];
+            subArcs.forEach(sub => {
+              const isTrimmed = isArcSegmentTrimmed(o.c, o.r, sub.a0, sub.a1, o.ccw, fenceStart, fenceEnd, isClick);
+              if (isTrimmed) {
+                oModified = true;
+                modified = true;
+              } else {
+                arcsToKeep.push(sub);
+              }
+            });
+            
+            if (oModified) {
+              newObjects = newObjects.filter(item => item !== o);
+              arcsToKeep.forEach(sub => {
+                newObjects.push({
+                  type: 'arc',
+                  c: o.c,
+                  r: o.r,
+                  a0: sub.a0,
+                  a1: sub.a1,
+                  ccw: o.ccw,
+                  color: o.color || currentColor,
+                  width: o.width || currentWidth
+                });
+              });
+            }
+          }
+        }
+      });
+
+      if (modified) {
+        pushUndo();
+        objects = newObjects;
+        updateStatus();
+      }
+    }
+
+    /* ---------------- CTX BAR (color/width) ---------------- */
+    function updateCtxBar() {
+      const bar = document.getElementById('ctxbar');
+      const drawTools = ['line', 'polyline', 'rect', 'circle', 'arc', 'ellipse', 'text', 'dim', 'hatch'];
+      
+      const getSelectedObject = () => {
+        if (!selected) return null;
+        if (Array.isArray(selected)) return selected[0];
+        return selected;
+      };
+      
+      const targetObj = getSelectedObject();
+      const isSelectedDraw = currentTool === 'select' && targetObj && ['line', 'polyline', 'rect', 'circle', 'arc', 'ellipse', 'text', 'dim', 'hatch'].includes(targetObj.type);
+      
+      if (drawTools.includes(currentTool) || isSelectedDraw) {
+        bar.style.display = 'flex';
+        const colorVal = isSelectedDraw ? (targetObj.color || currentColor) : currentColor;
+        const widthVal = isSelectedDraw ? (targetObj.width || currentWidth) : currentWidth;
+        const typeVal = isSelectedDraw ? (targetObj.lineType || currentLineType) : currentLineType;
+
+        const colLower = colorVal.toLowerCase();
+        bar.innerHTML = `
+          <label>COLOR 
+            <span class="color-swatches">
+              <span class="swatch ${colLower === '#ffffff' ? 'active' : ''}" data-color="#ffffff" style="background-color: #ffffff; --glow-color: #ffffff;" title="White"></span>
+              <span class="swatch ${colLower === '#ff5d5d' ? 'active' : ''}" data-color="#ff5d5d" style="background-color: #ff5d5d; --glow-color: #ff5d5d;" title="Red"></span>
+              <span class="swatch ${colLower === '#ffb43e' ? 'active' : ''}" data-color="#ffb43e" style="background-color: #ffb43e; --glow-color: #ffb43e;" title="Yellow"></span>
+              <span class="swatch ${colLower === '#5ffbb0' ? 'active' : ''}" data-color="#5ffbb0" style="background-color: #5ffbb0; --glow-color: #5ffbb0;" title="Green"></span>
+              <span class="swatch ${colLower === '#ff73c5' ? 'active' : ''}" data-color="#ff73c5" style="background-color: #ff73c5; --glow-color: #ff73c5;" title="Pink"></span>
+              <span class="swatch ${colLower === '#7ec8ff' ? 'active' : ''}" data-color="#7ec8ff" style="background-color: #7ec8ff; --glow-color: #7ec8ff;" title="Blue"></span>
+            </span>
+          </label>
+          <label>WIDTH <input type="range" id="cb-width" min="0.5" max="6" step="0.5" value="${widthVal}"></label>
+          <span id="cb-width-val">${widthVal}px</span>
+          <label>STYLE 
+            <select id="cb-style">
+              <option value="solid" ${typeVal === 'solid' ? 'selected' : ''}>Solid</option>
+              <option value="dashed" ${typeVal === 'dashed' ? 'selected' : ''}>Dashed</option>
+              <option value="shortdashed" ${typeVal === 'shortdashed' ? 'selected' : ''}>Short Dashed</option>
+              <option value="longdashed" ${typeVal === 'longdashed' ? 'selected' : ''}>Long Dashed</option>
+              <option value="dotted" ${typeVal === 'dotted' ? 'selected' : ''}>Dotted</option>
+              <option value="dotteddense" ${typeVal === 'dotteddense' ? 'selected' : ''}>Dotted Dense</option>
+              <option value="dashdot" ${typeVal === 'dashdot' ? 'selected' : ''}>Dash-Dot</option>
+              <option value="center" ${typeVal === 'center' ? 'selected' : ''}>Center Line</option>
+              <option value="phantom" ${typeVal === 'phantom' ? 'selected' : ''}>Phantom (Border)</option>
+            </select>
+          </label>
+        `;
+        
+        document.querySelectorAll('.swatch').forEach(sw => {
+          sw.onclick = () => {
+            const val = sw.dataset.color;
+            document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('active', s === sw));
+            if (selected) { 
+              pushUndo(); 
+              if (Array.isArray(selected)) {
+                selected.forEach(o => o.color = val);
+              } else {
+                selected.color = val;
+              }
+              render(); 
+            } else { 
+              currentColor = val; 
+            }
+            if (!isInitializing) {
+              saveToLocalStorage();
+            }
+          };
+        });
+        document.getElementById('cb-width').oninput = (e) => { 
+          const val = parseFloat(e.target.value);
+          document.getElementById('cb-width-val').textContent = val + 'px'; 
+          if (selected) { 
+            pushUndo(); 
+            if (Array.isArray(selected)) {
+              selected.forEach(o => o.width = val);
+            } else {
+              selected.width = val;
+            }
+            render(); 
+          } 
+          else { currentWidth = val; } 
+        };
+        document.getElementById('cb-style').onchange = (e) => { 
+          const val = e.target.value;
+          if (selected) { 
+            pushUndo(); 
+            if (Array.isArray(selected)) {
+              selected.forEach(o => o.lineType = val);
+            } else {
+              selected.lineType = val;
+            }
+            render(); 
+          } 
+          else { currentLineType = val; } 
+        };
+      } else {
+        bar.style.display = 'none';
+      }
+    }
+
+    document.getElementById('grid-toggle').onclick = (e) => { showGrid = !showGrid; e.target.classList.toggle('on', showGrid); render(); };
+    document.getElementById('snap-toggle').onclick = (e) => { snapOn = !snapOn; e.target.classList.toggle('on', snapOn); };
+    document.getElementById('ortho-toggle').onclick = (e) => { orthoOn = !orthoOn; e.target.classList.toggle('on', orthoOn); };
+    document.getElementById('endpoint-snap-toggle').onclick = (e) => { endpointSnapOn = !endpointSnapOn; e.target.classList.toggle('on', endpointSnapOn); if (!endpointSnapOn) activeSnapMarker = null; render(); };
+    document.getElementById('tangent-snap-toggle').onclick = (e) => { tangentSnapOn = !tangentSnapOn; e.target.classList.toggle('on', tangentSnapOn); if (!tangentSnapOn) activeTangentMarker = null; render(); };
+    document.getElementById('zoom-in').onclick = () => { view.scale = Math.min(8, view.scale * 1.2); document.getElementById('status-zoom').textContent = 'ZOOM: ' + Math.round(view.scale * 100) + '%'; render(); };
+    document.getElementById('zoom-out').onclick = () => { view.scale = Math.max(0.15, view.scale * 0.8); document.getElementById('status-zoom').textContent = 'ZOOM: ' + Math.round(view.scale * 100) + '%'; render(); };
+    document.getElementById('zoom-reset').onclick = () => { const r = wrap.getBoundingClientRect(); view = { ox: r.width / 2, oy: r.height / 2, scale: 1 }; document.getElementById('status-zoom').textContent = 'ZOOM: 100%'; render(); };
+
+    function updateStatus() { 
+      document.getElementById('status-objs').textContent = 'OBJECTS: ' + objects.length; 
+      if (!isInitializing) {
+        saveToLocalStorage();
+      }
+    }
+
+    /* ============================================================
+       TOOL REFERENCE PANEL — parsed from the AutoCAD guide
+       ============================================================ */
+    const REFERENCE_DATA = [
+      {
+        cat: '2D Geometry Creation (Draw)', items: [
+          { name: 'Line', short: 'L', desc: 'Creates independent, straight line segments between any two selected coordinate points. Ideal for basic boundary framing and simple geometric outlines.' },
+          { name: 'Polyline', short: 'PL', desc: 'Creates a continuous sequence of connected line or arc segments treated as a single object. Useful for custom closed profiles, 3D extrusion paths, and perimeter calculation.' },
+          { name: 'Circle', short: 'C', desc: 'Draws full circles based on a center point and a radius/diameter, or via constraints like 2-Point, 3-Point, Tangent-Tangent-Radius. Common for holes, shafts, and cylindrical sections.' },
+          { name: 'Rectangle', short: 'REC / R', desc: 'Generates a closed rectangular polyline from two diagonal corners, with options for chamfered or filleted corners during creation.' },
+          { name: 'Arc', short: 'A', desc: 'Draws a curved segment using combinations of start points, center points, endpoints, radii, and angles. Used for transitions, clearances, and structural arches.' },
+          { name: 'Ellipse', short: 'EL', desc: 'Creates an elliptical shape or arc defined by a major and minor axis. Frequently used to render cylindrical features in isometric or oblique views.' },
+          { name: 'Hatch', short: 'H', desc: 'Fills enclosed or bounded areas with patterns, gradients, or solid colors. Essential for cross-sections, material representation, and cutaways.' },
+          { name: 'Construction Line', short: 'XL', desc: 'Creates an infinite line through a point. Crucial for alignment grids, orthographic projection setup, and geometric datums.' },
+          { name: 'Spline', short: 'SPL', desc: 'Draws a smooth, continuous curve through or near a series of control points. Used in aerodynamic profiles, ergonomic contours, and surface modeling.' },
+        ]
+      },
+      {
+        cat: 'Geometric Modification (Modify)', items: [
+          { name: 'Move', short: 'M', desc: 'Relocates selected objects a specified displacement relative to a defined base point. Used to re-arrange components within an assembly or sheet.' },
+          { name: 'Copy', short: 'CO / CP', desc: 'Duplicates chosen objects and positions copies at new destination coordinates while leaving the original unaltered. Helpful for repetitive design features.' },
+          { name: 'Rotate', short: 'RO', desc: 'Pivots objects around a fixed base point to a specified angular degree or reference vector orientation.' },
+          { name: 'Scale', short: 'SC', desc: 'Proportionally enlarges or reduces selected objects using a base point and a numerical scale factor or reference distance.' },
+          { name: 'Offset', short: 'O', desc: 'Creates a parallel copy of lines, polylines, or concentric curves at a uniform distance. Used for wall thicknesses, clearance tracks, and step distances.' },
+          { name: 'Mirror', short: 'MI', desc: 'Creates a flipped, symmetrical copy of selected geometry across a reflection line axis. Saves time when modeling symmetrical components.' },
+          { name: 'Trim', short: 'TR / T', desc: 'Cuts off unwanted object segments exactly at a cutting boundary defined by intersecting lines or shapes. Essential for cleaning up line junctions.' },
+          { name: 'Extend', short: 'EX', desc: 'Lengthens open lines, polylines, or arcs so they precisely meet the boundary edge of another target object.' },
+          { name: 'Fillet', short: 'F', desc: 'Rounds off sharp corners by creating a smooth tangent arc of a specified radius between two intersecting lines. Reduces stress concentrations.' },
+          { name: 'Chamfer', short: 'CHA', desc: 'Bevels the sharp edge of a corner at a specified angle or distance. Used to indicate transitional edges on shafts or bolts.' },
+          { name: 'Stretch', short: 'S', desc: 'Elongates or compresses drawing elements by dragging vertices inside a crossing selection box, keeping connectivity intact.' },
+          { name: 'Explode', short: 'X', desc: 'Deconstructs a compound object (Block, Polyline, Rectangle) back into its individual component lines or arcs for standalone editing.' },
+          { name: 'Array', short: 'AR', desc: 'Creates patterned duplicates arranged in a rectangular grid, polar radial matrix, or along a curved path. Used for bolt hole circles, fins, and gear teeth.' },
+        ]
+      },
+      {
+        cat: '3D Modeling & Solid Editing', items: [
+          { name: 'Extrude', short: 'EXT', desc: 'Projects a closed 2D shape profile along a straight linear path to add uniform thickness or height. Ideal for prisms, blocks, and plate assemblies.' },
+          { name: 'Presspull', short: 'PRES', desc: 'Dynamically pulls a bounded 2D area outward to create a solid, or pushes it inward into an existing solid to cut a hole or slot.' },
+          { name: 'Revolve', short: 'REV', desc: 'Sweeps a 2D profile in a circular trajectory around a center axis to create a symmetrical 3D round solid. Used for shafts, pulleys, and flywheels.' },
+          { name: 'Loft', short: 'LOFT', desc: 'Generates a smooth 3D skin spanning multiple distinct 2D cross-sections at different spatial heights. Used for ducts, car bodies, and organic transitions.' },
+          { name: 'Sweep', short: 'SWEEP', desc: 'Extrudes a 2D cross-section uniformly along a custom open or closed path. Excellent for springs, pipes, wiring harnesses, and frames.' },
+          { name: 'Union', short: 'UNI', desc: 'A Boolean operation that fuses two or more overlapping 3D solids into a single unified solid mass.' },
+          { name: 'Subtract', short: 'SU', desc: 'A Boolean tool that removes the intersecting volume of secondary solid bodies from a primary base solid. Used for keyways and internal bores.' },
+          { name: 'Intersect', short: 'IN', desc: 'Evaluates overlapping 3D solids, keeps only the shared volume, and discards non-overlapping material. Useful for complex tooling profiles.' },
+        ]
+      },
+      {
+        cat: 'Annotation & Metrology', items: [
+          { name: 'Multiline Text', short: 'MT / T', desc: 'Inserts a text editor block for compiling technical specifications, drawing notes, title block descriptions, and materials lists.' },
+          { name: 'Dimension', short: 'DIM / D', desc: 'An intelligent master command that evaluates selected lines or points and automatically applies the correct dimension type (Linear, Aligned, Radial, or Angular).' },
+          { name: 'Linear Dimension', short: 'DLI', desc: 'Measures and locks horizontal or vertical linear distances between two geometric endpoints. Standard method for width and height.' },
+          { name: 'Aligned Dimension', short: 'DAL', desc: 'Measures the true direct distance between two points along an angled line parallel to the feature, when horizontal/vertical would give false metrics.' },
+          { name: 'Angular Dimension', short: 'DAN', desc: 'Calculates and labels the precise angle formed between two intersecting lines or lines radiating from a shared vertex.' },
+          { name: 'Measure Geometry', short: 'MEA', desc: 'A diagnostic tool that calculates distance, angles, radii, surface areas, or solid volumes without placing permanent dimension lines.' },
+        ]
+      },
+      {
+        cat: 'Workflow Efficiency & Management', items: [
+          { name: 'Layer Manager', short: 'LA', desc: 'Opens the structural layer control panel to assign colors, line types, and line weights, keeping drawing elements isolated and manageable.' },
+          { name: 'Create Block', short: 'B', desc: 'Binds individual line/arc elements into a singular named library asset. Ideal for repeating hardware like screws, bearings, or valves.' },
+          { name: 'Insert Block', short: 'I', desc: 'Calls up the block library window to insert pre-defined symbols or external drawings into the active workspace coordinates.' },
+          { name: 'Purge', short: 'PU', desc: 'Scans the internal database to permanently wipe empty layers, unused blocks, unreferenced line styles, and ghost data, shrinking file size.' },
+          { name: 'Regenerate', short: 'RE', desc: 'Forces the software to recalculate the graphic display buffer, repairing artifacts such as circles rendering as polygons.' },
+        ]
+      },
+    ];
+
+    let activeTab = 'All';
+
+    function renderTabs() {
+      const tabs = document.getElementById('ref-tabs');
+      const cats = ['All', ...REFERENCE_DATA.map(g => g.cat)];
+      tabs.innerHTML = cats.map(c => `<button class="ref-tab ${c === activeTab ? 'on' : ''}" data-cat="${c}">${c === 'All' ? 'ALL' : c.split('(')[0].trim().toUpperCase()}</button>`).join('');
+      tabs.querySelectorAll('.ref-tab').forEach(t => {
+        t.onclick = () => { activeTab = t.dataset.cat; renderTabs(); renderList(); };
+      });
+    }
+
+    function renderList(query = '') {
+      const list = document.getElementById('ref-list');
+      list.innerHTML = '';
+      const q = query.trim().toLowerCase();
+      REFERENCE_DATA.forEach(group => {
+        if (activeTab !== 'All' && group.cat !== activeTab) return;
+        group.items.forEach(item => {
+          if (q && !(item.name.toLowerCase().includes(q) || item.short.toLowerCase().includes(q) || item.desc.toLowerCase().includes(q))) return;
+          const card = document.createElement('div');
+          card.className = 'ref-card';
+          card.innerHTML = `
+        <div class="rc-head">
+          <span class="rc-name">${item.name}<span class="rc-short">${item.short}</span></span>
+          <span style="color:var(--paper-dim);font-family:var(--mono);font-size:10px;">▾</span>
+        </div>
+        <div class="rc-body">${item.desc}<span class="rc-cat">${group.cat}</span></div>
+      `;
+          card.querySelector('.rc-head').onclick = () => card.classList.toggle('open');
+          list.appendChild(card);
+        });
+      });
+      if (!list.children.length) {
+        list.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:var(--paper-dim);text-align:center;padding:30px 10px;">NO MATCHING COMMANDS</div>`;
+      }
+    }
+
+    document.getElementById('ref-search-input').addEventListener('input', (e) => renderList(e.target.value));
+    renderTabs(); renderList();
+
+    /* panel open/close */
+    const mainEl = document.getElementById('main');
+    function openPanel() { mainEl.classList.add('panel-open'); }
+    function closePanel() { mainEl.classList.remove('panel-open'); }
+    document.getElementById('open-ref-btn').onclick = openPanel;
+    document.getElementById('close-ref-btn').onclick = closePanel;
+
+    /* ============================================================
+       PDF UPLOAD + PARSE (replace reference data with user's own PDF)
+       ============================================================ */
+    const modalBg = document.getElementById('upload-modal-bg');
+    document.getElementById('upload-pdf-btn').onclick = () => modalBg.classList.add('show');
+    document.getElementById('cancel-upload-btn').onclick = () => modalBg.classList.remove('show');
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    dropZone.onclick = () => fileInput.click();
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault(); dropZone.classList.remove('drag');
+      if (e.dataTransfer.files.length) handlePdfUpload(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', e => { if (e.target.files.length) handlePdfUpload(e.target.files[0]); });
+
+    async function handlePdfUpload(file) {
+      if (file.type !== 'application/pdf') { alert('Please upload a PDF file.'); return; }
+      const statusEl = document.getElementById('upload-status');
+      statusEl.style.display = 'block';
+      statusEl.textContent = 'PARSING ' + file.name + '…';
+      try {
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map(it => it.str).join(' ') + '\n';
+        }
+        const parsed = parseToolTextLoosely(fullText);
+        if (parsed.length) {
+          REFERENCE_DATA.length = 0;
+          REFERENCE_DATA.push({ cat: 'Uploaded Reference', items: parsed });
+          activeTab = 'All';
+          renderTabs(); renderList();
+          document.getElementById('ref-source-hint').textContent = `SOURCE: ${file.name} · ${parsed.length} commands detected`;
+          statusEl.textContent = `LOADED ${parsed.length} COMMANDS FROM ${file.name}`;
+          setTimeout(() => { modalBg.classList.remove('show'); statusEl.style.display = 'none'; openPanel(); }, 900);
+        } else {
+          statusEl.textContent = 'NO RECOGNIZABLE TOOL TABLE FOUND — KEEPING CURRENT REFERENCE SET.';
+        }
+      } catch (err) {
+        statusEl.textContent = 'COULD NOT PARSE THIS PDF: ' + err.message;
+      }
+    }
+
+    // Loose heuristic parse: look for "Name SHORTCUT description..." patterns is unreliable across PDFs,
+    // so we fall back to splitting on capitalized short tokens followed by long text runs.
+    function parseToolTextLoosely(text) {
+      const items = [];
+      // collapse whitespace
+      const clean = text.replace(/\s+/g, ' ').trim();
+      // try to find segments like "WordWord SHORT Description sentence..." where SHORT is 1-6 uppercase letters/slashes
+      const regex = /([A-Z][a-zA-Z ]{2,30}?)\s+([A-Z]{1,6}(?:\s?\/\s?[A-Z]{1,6})?)\s+([A-Z][^A-Z]{20,400}?)(?=(?:[A-Z][a-zA-Z ]{2,30}\s+[A-Z]{1,6}(?:\s?\/\s?[A-Z]{1,6})?\s+[A-Z])|$)/g;
+      let m;
+      while ((m = regex.exec(clean)) !== null && items.length < 60) {
+        const name = m[1].trim();
+        const short = m[2].trim();
+        const desc = m[3].trim();
+        if (name.length > 1 && desc.length > 15) {
+          items.push({ name, short, desc });
+        }
+      }
+      return items;
+    }
+
+    /* ============================================================
+       EXPORT: DRAWING -> PDF
+       ============================================================ */
+    document.getElementById('export-pdf-btn').onclick = () => {
+      const { jsPDF } = window.jspdf;
+      const r = wrap.getBoundingClientRect();
+      const orient = r.width >= r.height ? 'l' : 'p';
+      const doc = new jsPDF({ orientation: orient, unit: 'pt', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      // Title block
+      doc.setFont('courier', 'bold'); doc.setFontSize(14);
+      doc.setTextColor(20, 30, 25);
+      const title = document.getElementById('doc-title').value || 'UNTITLED';
+      doc.text('DRAFT/2  —  ' + title, 28, 32);
+      doc.setFont('courier', 'normal'); doc.setFontSize(8);
+      doc.setTextColor(90, 100, 95);
+      const now = new Date();
+      doc.text('Exported ' + now.toLocaleString() + '   ·   Objects: ' + objects.length + '   ·   Units: mm', 28, 44);
+      doc.setDrawColor(180, 190, 185);
+      doc.line(28, 50, pageW - 28, 50);
+
+      // draw frame for canvas content
+      const frameTop = 64, frameBottom = pageH - 30, frameLeft = 28, frameRight = pageW - 28;
+      const frameW = frameRight - frameLeft, frameH = frameBottom - frameTop;
+      doc.setDrawColor(210, 215, 210);
+      doc.rect(frameLeft, frameTop, frameW, frameH);
+
+      // compute bounds of objects in world space, fit to frame
+      let bounds = computeBounds();
+      if (!bounds) { bounds = { minX: -200, minY: -200, maxX: 200, maxY: 200 }; }
+      const bw = Math.max(1, bounds.maxX - bounds.minX), bh = Math.max(1, bounds.maxY - bounds.minY);
+      const pad = 20;
+      const scale = Math.min((frameW - 2 * pad) / bw, (frameH - 2 * pad) / bh);
+      const offX = frameLeft + pad - bounds.minX * scale + Math.max(0, (frameW - 2 * pad - bw * scale) / 2);
+      const offY = frameTop + pad - bounds.minY * scale + Math.max(0, (frameH - 2 * pad - bh * scale) / 2);
+
+      const toPdf = (x, y) => [offX + x * scale, offY + y * scale];
+      doc.setLineCap('round'); doc.setLineJoin('round');
+
+      function setPdfLineDash(doc, type) {
+        if (type === 'dashed') {
+          doc.setLineDashPattern([8, 6], 0);
+        } else if (type === 'shortdashed') {
+          doc.setLineDashPattern([4, 4], 0);
+        } else if (type === 'longdashed') {
+          doc.setLineDashPattern([16, 6], 0);
+        } else if (type === 'dotted') {
+          doc.setLineDashPattern([2, 4], 0);
+        } else if (type === 'dotteddense') {
+          doc.setLineDashPattern([2, 2], 0);
+        } else if (type === 'dashdot') {
+          doc.setLineDashPattern([10, 4, 2, 4], 0);
+        } else if (type === 'center') {
+          doc.setLineDashPattern([12, 3, 3, 3], 0);
+        } else if (type === 'phantom') {
+          doc.setLineDashPattern([12, 3, 3, 3, 3, 3], 0);
+        } else {
+          doc.setLineDashPattern([], 0);
+        }
+      }
+
+      objects.forEach(o => {
+        let col = o.color || '#ffffff';
+        const cleanHex = col.toLowerCase().replace('#', '');
+        if (cleanHex === 'ffffff' || cleanHex === 'e9efe6' || cleanHex === 'fff') {
+          col = '#000000';
+        } else {
+          const rVal = parseInt(cleanHex.substring(0, 2), 16);
+          const gVal = parseInt(cleanHex.substring(2, 4), 16);
+          const bVal = parseInt(cleanHex.substring(4, 6), 16);
+          if (!isNaN(rVal) && !isNaN(gVal) && !isNaN(bVal)) {
+            const luminance = (0.299 * rVal + 0.587 * gVal + 0.114 * bVal) / 255;
+            if (luminance > 0.85) {
+              col = '#000000';
+            }
+          }
+        }
+        const [r, g, b] = hexToRgb(col);
+        doc.setDrawColor(r, g, b); doc.setTextColor(r, g, b);
+        doc.setLineWidth((o.width || 1.5) * 0.5);
+
+        // Apply line dash
+        const type = o.lineType || 'solid';
+        setPdfLineDash(doc, type);
+
+        if (o.type === 'dim' && o.dimType === 'angle') {
+          const [cx, cy] = toPdf(...o.c);
+          const r = o.r * scale;
+          const a0 = o.a0;
+          const a1 = o.a1;
+          const ccw = !!o.ccw;
+
+          let diff = a1 - a0;
+          if (ccw) {
+            if (diff > 0) diff -= 2 * Math.PI;
+          } else {
+            if (diff < 0) diff += 2 * Math.PI;
+          }
+
+          const numSegs = Math.max(16, Math.floor(Math.abs(diff) * 16));
+          let prevX = cx + r * Math.cos(a0);
+          let prevY = cy + r * Math.sin(a0);
+          for (let i = 1; i <= numSegs; i++) {
+            const angle = a0 + (diff * i) / numSegs;
+            const nextX = cx + r * Math.cos(angle);
+            const nextY = cy + r * Math.sin(angle);
+            doc.line(prevX, prevY, nextX, nextY);
+            prevX = nextX;
+            prevY = nextY;
+          }
+
+          doc.saveGraphicsState();
+          doc.setLineDashPattern([], 0);
+          [a0, a1].forEach(a => {
+            const cos = Math.cos(a);
+            const sin = Math.sin(a);
+            doc.line(
+              cx + (r - 4) * cos,
+              cy + (r - 4) * sin,
+              cx + (r + 4) * cos,
+              cy + (r + 4) * sin
+            );
+          });
+          doc.restoreGraphicsState();
+
+          doc.setFontSize(7);
+          let angleRad = a1 - a0;
+          if (angleRad < 0) angleRad += 2 * Math.PI;
+          if (angleRad > Math.PI) angleRad = 2 * Math.PI - angleRad;
+          const angleDeg = angleRad * 180 / Math.PI;
+          const label = angleDeg.toFixed(1) + '°';
+
+          const midAngle = a0 + angleRad / 2;
+          const textX = cx + (r + 6) * Math.cos(midAngle);
+          const textY = cy + (r + 6) * Math.sin(midAngle);
+          doc.text(label, textX, textY);
+        } else if (o.type === 'line' || o.type === 'dim') {
+          const [x1, y1] = toPdf(...o.p1), [x2, y2] = toPdf(...o.p2);
+          doc.line(x1, y1, x2, y2);
+          if (o.type === 'dim') {
+            // Draw extension lines if there is a target line
+            if (o.dimType === 'lineLength' && o.targetId && objects.includes(o.targetId)) {
+              const target = o.targetId;
+              let tp1, tp2;
+              if (target.type === 'rect' || target.type === 'hatch') {
+                const rx1 = Math.min(target.p1[0], target.p2[0]), rx2 = Math.max(target.p1[0], target.p2[0]);
+                const ry1 = Math.min(target.p1[1], target.p2[1]), ry2 = Math.max(target.p1[1], target.p2[1]);
+                const sides = [
+                  [[rx1, ry1], [rx2, ry1]], // Top (0)
+                  [[rx2, ry1], [rx2, ry2]], // Right (1)
+                  [[rx1, ry2], [rx2, ry2]], // Bottom (2)
+                  [[rx1, ry1], [rx1, ry2]]  // Left (3)
+                ];
+                const sideIdx = o.rectSide !== undefined ? o.rectSide : 0;
+                tp1 = sides[sideIdx][0];
+                tp2 = sides[sideIdx][1];
+              } else {
+                tp1 = target.p1;
+                tp2 = target.p2;
+              }
+              const [tx1, ty1] = toPdf(...tp1);
+              const [tx2, ty2] = toPdf(...tp2);
+              doc.saveGraphicsState();
+              doc.setLineWidth(Math.max(0.3, (o.width || 1.5) * 0.3));
+              doc.setLineDashPattern([2, 2], 0);
+              doc.line(tx1, ty1, x1, y1);
+              doc.line(tx2, ty2, x2, y2);
+              doc.restoreGraphicsState();
+            }
+
+            // Draw ticks (always solid)
+            doc.saveGraphicsState();
+            doc.setLineDashPattern([], 0);
+            const ang = Math.atan2(y2 - y1, x2 - x1);
+            [[x1, y1], [x2, y2]].forEach(([x, y]) => {
+              doc.line(
+                x - 4 * Math.cos(ang + Math.PI / 2),
+                y - 4 * Math.sin(ang + Math.PI / 2),
+                x + 4 * Math.cos(ang + Math.PI / 2),
+                y + 4 * Math.sin(ang + Math.PI / 2)
+              );
+            });
+            doc.restoreGraphicsState();
+
+            // Text
+            const dist = Math.hypot(o.p2[0] - o.p1[0], o.p2[1] - o.p1[1]);
+            doc.setFontSize(7);
+            let label = dist.toFixed(1) + 'mm';
+            if (o.dimType === 'radius') {
+              label = 'R ' + label;
+            }
+            doc.text(label, (x1 + x2) / 2 + 3, (y1 + y2) / 2 - 3);
+          }
+        } else if (o.type === 'rect' || o.type === 'hatch') {
+          const [x1, y1] = toPdf(...o.p1), [x2, y2] = toPdf(...o.p2);
+          doc.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        } else if (o.type === 'circle') {
+          const [cx, cy] = toPdf(...o.c);
+          doc.circle(cx, cy, o.r * scale);
+        } else if (o.type === 'ellipse') {
+          const [cx, cy] = toPdf(...o.c);
+          doc.ellipse(cx, cy, o.rx * scale, o.ry * scale);
+        } else if (o.type === 'arc') {
+          const [cx, cy] = toPdf(...o.c);
+          const r = o.r * scale;
+          const a0 = o.a0;
+          const a1 = o.a1;
+          const ccw = !!o.ccw;
+
+          let diff = a1 - a0;
+          if (ccw) {
+            if (diff > 0) diff -= 2 * Math.PI;
+          } else {
+            if (diff < 0) diff += 2 * Math.PI;
+          }
+
+          const numSegs = Math.max(16, Math.floor(Math.abs(diff) * 16));
+          let prevX = cx + r * Math.cos(a0);
+          let prevY = cy + r * Math.sin(a0);
+          for (let i = 1; i <= numSegs; i++) {
+            const angle = a0 + (diff * i) / numSegs;
+            const nextX = cx + r * Math.cos(angle);
+            const nextY = cy + r * Math.sin(angle);
+            doc.line(prevX, prevY, nextX, nextY);
+            prevX = nextX;
+            prevY = nextY;
+          }
+        } else if (o.type === 'polyline') {
+          for (let i = 0; i < o.pts.length - 1; i++) {
+            const [x1, y1] = toPdf(...o.pts[i]), [x2, y2] = toPdf(...o.pts[i + 1]);
+            doc.line(x1, y1, x2, y2);
+          }
+        } else if (o.type === 'text') {
+          const [x, y] = toPdf(...o.p);
+          doc.setFontSize(10); doc.setFont('courier', 'normal');
+          doc.text(o.text, x, y);
+        }
+      });      doc.setFontSize(7.5); doc.setTextColor(140, 150, 145); doc.setFont('courier', 'normal');
+      doc.text('Generated with DRAFT/2 — 2D CAD Workspace', frameLeft, pageH - 14);
+
+      doc.save((title || 'drawing').replace(/[^a-z0-9_-]+/gi, '_') + '.pdf');
+    };
+
+    function computeBounds() {
+      if (!objects.length) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const acc = (x, y) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
+      objects.forEach(o => {
+        if (o.p1) acc(...o.p1); if (o.p2) acc(...o.p2);
+        if (o.p) acc(...o.p);
+        if (o.c) { const r = o.r || Math.max(o.rx || 0, o.ry || 0); acc(o.c[0] - r, o.c[1] - r); acc(o.c[0] + r, o.c[1] + r); }
+        if (o.pts) o.pts.forEach(p => acc(...p));
+      });
+      return { minX, minY, maxX, maxY };
+    }
+
+    function hexToRgb(hex) {
+      const h = hex.replace('#', '');
+      return [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+    }
+
+    /* ============================================================
+       EXPORT: TOOL REFERENCE -> PDF
+       ============================================================ */
+    document.getElementById('export-ref-pdf-btn').onclick = () => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      let y = 50;
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(20, 30, 25);
+      doc.text('AutoCAD Tools Reference', 40, y);
+      y += 18;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(100, 110, 105);
+      doc.text('Exported from DRAFT/2 — command names, shortcuts, and engineering applications', 40, y);
+      y += 10;
+      doc.setDrawColor(200, 200, 200); doc.line(40, y, pageW - 40, y);
+      y += 22;
+
+      REFERENCE_DATA.forEach(group => {
+        if (y > pageH - 80) { doc.addPage(); y = 50; }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5); doc.setTextColor(30, 110, 75);
+        doc.text(group.cat.toUpperCase(), 40, y);
+        y += 16;
+        doc.setDrawColor(225, 225, 225); doc.line(40, y - 6, pageW - 40, y - 6);
+
+        group.items.forEach(item => {
+          if (y > pageH - 70) { doc.addPage(); y = 50; }
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(15, 20, 18);
+          doc.text(item.name, 44, y);
+          const nameWidth = doc.getTextWidth(item.name);
+          doc.setFont('courier', 'bold'); doc.setFontSize(8.5); doc.setTextColor(160, 110, 30);
+          doc.text('[' + item.short + ']', 44 + nameWidth + 8, y);
+          y += 13;
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70, 80, 76);
+          const lines = doc.splitTextToSize(item.desc, pageW - 100);
+          lines.forEach(line => {
+            if (y > pageH - 50) { doc.addPage(); y = 50; }
+            doc.text(line, 50, y);
+            y += 11.5;
+          });
+          y += 8;
+        });
+        y += 6;
+      });
+
+      // footer page numbers
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(150, 155, 150);
+        doc.text(`Page ${i} of ${pageCount}`, pageW - 90, pageH - 20);
+        doc.text('DRAFT/2 Tool Reference Export', 40, pageH - 20);
+      }
+
+      doc.save('AutoCAD_Tools_Reference_Export.pdf');
+    };
+
+    function setupObjectsIntercept() {
+      const originalPush = objects.push;
+      objects.push = function(...args) {
+        args.forEach(obj => {
+          if (obj && typeof obj === 'object' && !obj.lineType) {
+            obj.lineType = currentLineType;
+          }
+        });
+        return originalPush.apply(this, args);
+      };
+    }
+
+    /* ============================================================
+       .CRA FILE FORMAT SAVE / DOWNLOAD / IMPORT / DRAG-AND-DROP / AUTOSAVE
+       ============================================================ */
+    let notificationTimeout = null;
+    function showFloatingStatus(message, type = 'info') {
+      const el = document.getElementById('floating-status');
+      if (!el) return;
+      el.textContent = message.toUpperCase();
+      
+      if (notificationTimeout) clearTimeout(notificationTimeout);
+      el.style.borderColor = '';
+      el.style.color = '';
+      el.style.boxShadow = '';
+
+      if (type === 'success') {
+        el.style.color = 'var(--phosphor)';
+        el.style.borderColor = 'var(--phosphor)';
+        el.style.boxShadow = '0 0 8px rgba(95, 251, 176, 0.4)';
+      } else if (type === 'error') {
+        el.style.color = 'var(--redline)';
+        el.style.borderColor = 'var(--redline)';
+        el.style.boxShadow = '0 0 8px rgba(255, 93, 93, 0.4)';
+      } else if (type === 'warning') {
+        el.style.color = 'var(--amber)';
+        el.style.borderColor = 'var(--amber)';
+        el.style.boxShadow = '0 0 8px rgba(255, 180, 62, 0.4)';
+      }
+
+      notificationTimeout = setTimeout(() => {
+        el.textContent = 'READY';
+        el.style.borderColor = '';
+        el.style.color = '';
+        el.style.boxShadow = '';
+        notificationTimeout = null;
+      }, 3000);
+    }
+
+    function serializeDrawing() {
+      // Assign temporary IDs to objects to serialize references
+      objects.forEach((obj, idx) => {
+        obj._tempId = `obj_${idx}`;
+      });
+
+      const serializedObjects = objects.map(obj => {
+        const clone = { ...obj };
+        delete clone._tempId;
+        
+        if (obj.targetId) {
+          if (obj.targetId._tempId) {
+            clone.targetId = obj.targetId._tempId;
+          } else {
+            const targetIdx = objects.indexOf(obj.targetId);
+            if (targetIdx !== -1) {
+              clone.targetId = `obj_${targetIdx}`;
+            } else {
+              delete clone.targetId;
+            }
+          }
+        }
+        if (obj.targetId1) {
+          if (obj.targetId1._tempId) {
+            clone.targetId1 = obj.targetId1._tempId;
+          } else {
+            const targetIdx = objects.indexOf(obj.targetId1);
+            if (targetIdx !== -1) {
+              clone.targetId1 = `obj_${targetIdx}`;
+            } else {
+              delete clone.targetId1;
+            }
+          }
+        }
+        if (obj.targetId2) {
+          if (obj.targetId2._tempId) {
+            clone.targetId2 = obj.targetId2._tempId;
+          } else {
+            const targetIdx = objects.indexOf(obj.targetId2);
+            if (targetIdx !== -1) {
+              clone.targetId2 = `obj_${targetIdx}`;
+            } else {
+              delete clone.targetId2;
+            }
+          }
+        }
+        return clone;
+      });
+
+      // Clean up temporary IDs from live memory
+      objects.forEach(obj => delete obj._tempId);
+
+      const title = document.getElementById('doc-title').value || 'UNTITLED-01';
+
+      return JSON.stringify({
+        fileType: 'draft2_cra',
+        version: 1,
+        docTitle: title,
+        view: { ox: view.ox, oy: view.oy, scale: view.scale },
+        settings: {
+          currentColor,
+          currentWidth,
+          currentLineType,
+          showGrid,
+          snapOn,
+          orthoOn,
+          endpointSnapOn,
+          tangentSnapOn
+        },
+        objects: serializedObjects
+      }, null, 2);
+    }
+
+    function deserializeDrawing(jsonStr) {
+      const data = JSON.parse(jsonStr);
+      if (data.fileType !== 'draft2_cra') {
+        throw new Error('Not a valid DRAFT/2 (.cra) drawing file.');
+      }
+
+      const prevInitializing = isInitializing;
+      isInitializing = true;
+
+      try {
+        if (data.docTitle) {
+          document.getElementById('doc-title').value = data.docTitle;
+        }
+        if (data.view) {
+          view.ox = data.view.ox !== undefined ? data.view.ox : view.ox;
+          view.oy = data.view.oy !== undefined ? data.view.oy : view.oy;
+          view.scale = data.view.scale !== undefined ? data.view.scale : view.scale;
+          document.getElementById('status-zoom').textContent = 'ZOOM: ' + Math.round(view.scale * 100) + '%';
+        }
+        if (data.settings) {
+          const s = data.settings;
+          if (s.currentColor !== undefined) currentColor = s.currentColor;
+          if (s.currentWidth !== undefined) currentWidth = s.currentWidth;
+          if (s.currentLineType !== undefined) currentLineType = s.currentLineType;
+          if (s.showGrid !== undefined) {
+            showGrid = s.showGrid;
+            document.getElementById('grid-toggle').classList.toggle('on', showGrid);
+          }
+          if (s.snapOn !== undefined) {
+            snapOn = s.snapOn;
+            document.getElementById('snap-toggle').classList.toggle('on', snapOn);
+          }
+          if (s.orthoOn !== undefined) {
+            orthoOn = s.orthoOn;
+            document.getElementById('ortho-toggle').classList.toggle('on', orthoOn);
+          }
+          if (s.endpointSnapOn !== undefined) {
+            endpointSnapOn = s.endpointSnapOn;
+            document.getElementById('endpoint-snap-toggle').classList.toggle('on', endpointSnapOn);
+          }
+          if (s.tangentSnapOn !== undefined) {
+            tangentSnapOn = s.tangentSnapOn;
+            document.getElementById('tangent-snap-toggle').classList.toggle('on', tangentSnapOn);
+          }
+        }
+
+        const loadedObjects = data.objects || [];
+        const objMap = {};
+        loadedObjects.forEach((obj, idx) => {
+          const tempId = `obj_${idx}`;
+          objMap[tempId] = obj;
+        });
+
+        loadedObjects.forEach(obj => {
+          if (obj.targetId && typeof obj.targetId === 'string' && obj.targetId.startsWith('obj_')) {
+            obj.targetId = objMap[obj.targetId] || null;
+          }
+          if (obj.targetId1 && typeof obj.targetId1 === 'string' && obj.targetId1.startsWith('obj_')) {
+            obj.targetId1 = objMap[obj.targetId1] || null;
+          }
+          if (obj.targetId2 && typeof obj.targetId2 === 'string' && obj.targetId2.startsWith('obj_')) {
+            obj.targetId2 = objMap[obj.targetId2] || null;
+          }
+        });
+
+        objects = loadedObjects;
+        undoStack = [];
+        setupObjectsIntercept();
+        selected = null;
+        hoveredObj = null;
+
+        updateStatus();
+        updateCtxBar();
+        render();
+      } finally {
+        isInitializing = prevInitializing;
+      }
+    }
+
+    function saveToLocalStorage() {
+      try {
+        const dataStr = serializeDrawing();
+        localStorage.setItem('draft2_autosave', dataStr);
+      } catch (err) {
+        console.error('Autosave failed:', err);
+      }
+    }
+
+    async function handleCraFileUpload(file) {
+      try {
+        const text = await file.text();
+        deserializeDrawing(text);
+        showFloatingStatus('IMPORTED ' + file.name, 'success');
+      } catch (err) {
+        showFloatingStatus('IMPORT FAILED', 'error');
+        alert('Could not import DRAFT/2 drawing: ' + err.message);
+      }
+    }
+
+    function setupCraHandlers() {
+      const importFileInput = document.getElementById('import-cra-file');
+      const importBtn = document.getElementById('import-cra-btn');
+      const exportBtn = document.getElementById('export-cra-btn');
+      const titleInput = document.getElementById('doc-title');
+
+      if (importBtn && importFileInput) {
+        importBtn.onclick = () => importFileInput.click();
+        importFileInput.onchange = (e) => {
+          if (e.target.files.length) {
+            handleCraFileUpload(e.target.files[0]);
+            importFileInput.value = '';
+          }
+        };
+      }
+
+      if (exportBtn) {
+        exportBtn.onclick = () => {
+          try {
+            const jsonText = serializeDrawing();
+            const title = document.getElementById('doc-title').value || 'drawing';
+            const blob = new Blob([jsonText], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = title.replace(/[^a-z0-9_-]+/gi, '_') + '.cra';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showFloatingStatus('DOWNLOADED ' + title + '.CRA', 'success');
+          } catch (err) {
+            showFloatingStatus('DOWNLOAD FAILED', 'error');
+            console.error('Download failed:', err);
+          }
+        };
+      }
+
+      if (titleInput) {
+        titleInput.addEventListener('input', () => {
+          if (!isInitializing) {
+            saveToLocalStorage();
+          }
+        });
+      }
+
+      // Drag and Drop
+      const canvasWrap = document.getElementById('canvas-wrap');
+      const dragDropOverlay = document.getElementById('drag-drop-overlay');
+
+      if (canvasWrap && dragDropOverlay) {
+        const preventDefaults = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+          canvasWrap.addEventListener(eventName, preventDefaults, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+          canvasWrap.addEventListener(eventName, () => {
+            dragDropOverlay.classList.add('dragover');
+          }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+          canvasWrap.addEventListener(eventName, () => {
+            dragDropOverlay.classList.remove('dragover');
+          }, false);
+        });
+
+        canvasWrap.addEventListener('drop', (e) => {
+          const dt = e.dataTransfer;
+          const files = dt.files;
+
+          if (files.length) {
+            const file = files[0];
+            if (file.name.toLowerCase().endsWith('.cra')) {
+              handleCraFileUpload(file);
+            } else {
+              showFloatingStatus('NOT A .CRA FILE', 'error');
+            }
+          }
+        }, false);
+
+        // Prevent opening drops globally
+        window.addEventListener('dragover', preventDefaults, false);
+        window.addEventListener('drop', preventDefaults, false);
+      }
+    }
+
+    /* ============================================================
+       INIT
+       ============================================================ */
+    function init() {
+      resizeCanvas();
+      const r = wrap.getBoundingClientRect();
+      view = { ox: r.width / 2, oy: r.height / 2, scale: 1 };
+      setupObjectsIntercept();
+      setTool('select');
+      
+      // Initialize .cra file handlers
+      setupCraHandlers();
+
+      // Load autosaved data on startup
+      isInitializing = true;
+      try {
+        const autosavedData = localStorage.getItem('draft2_autosave');
+        if (autosavedData) {
+          deserializeDrawing(autosavedData);
+          showFloatingStatus('DRAWING RECOVERED', 'success');
+        }
+      } catch (err) {
+        console.error('Auto-recovery load failed:', err);
+      } finally {
+        isInitializing = false;
+      }
+
+      updateStatus();
+      render();
+    }
+    window.addEventListener('load', init);
+    if (document.readyState === 'complete') init();
+  </script>
+</body>
+
+</html>
